@@ -109,16 +109,11 @@ class Config:
     pcn_init_scale: float = 1.0  # birth W_down std is this / sqrt(fan_in); W_lat and biases start at 0
     pcn_weight_decay: float = 0.01  # 1/s decay on W_down and W_up; makes W_up re-align to W_down^T (Kolen–Pollack)
 
-    # --- plasticity (SPEC 7.5); init_* are birth defaults the genome later evolves ---
-    init_log_lr: float = 1.0  # per-synapse log learning rate at birth (lr = e ≈ 2.7/s)
+    # --- plasticity (SPEC 7.5); init_* are birth defaults the genome later evolves; rule constants live in substrate/plasticity.py ---
+    init_log_lr: float = 0.0  # per-synapse log learning rate at birth (lr = 1/s, the clip ceiling)
     init_meta_tau: float = 0.1  # per-synapse metaplasticity hardening constant at birth
-    meta_decay: float = 1e-3  # 1/s passive metaplasticity decay; small and nonzero so unused synapses reopen
-    cort_plasticity_suppression: float = 0.5  # fraction of plasticity removed per unit CORT in the gate
 
-    # --- neuromodulation (SPEC 7.6) ---
-    nm_init: tuple[float, ...] = (0.5, 0.5, 0.5, 0.5, 0.5, 0.0)  # levels at birth: DA, 5HT, NE, ACh, OT, CORT
+    # --- neuromodulation (SPEC 7.6); channel constants live in substrate/neuromod.py ---
     nm_gain_init: tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # birth driver gains, evolved
     nm_tau_init: tuple[float, ...] = (0.2, 5.0, 0.1, 0.5, 10.0, 20.0)  # birth time constants in s, evolved
-    nm_max: float = 2.0  # upper clip for every channel
-    sht_arousal_ref: float = 0.5  # arousal above which 5HT is driven down (impulsivity)
-    cort_pred_err_threshold: float = 0.3  # pred_err above which arousal drives CORT (sustained stress)
+    da_tonic_prior: tuple[float, float] = (0.1, 1.0)  # uniform prior on the evolved tonic DA level (genome da_tonic)

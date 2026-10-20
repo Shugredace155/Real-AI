@@ -152,22 +152,28 @@ def _vmap_pcn() -> None:
 
 
 def _vmap_plasticity() -> None:
+    from _birth import birth_genome
+
     from creature.substrate import plasticity as pl
 
+    g = birth_genome()
     w = jnp.zeros((VMAP_BATCH, 4, 3))
-    nm = jnp.ones((VMAP_BATCH, CFG.n_neuromod))
+    gate = jnp.ones(VMAP_BATCH)
     pre, post = jnp.ones((VMAP_BATCH, 3)), jnp.ones((VMAP_BATCH, 4))
-    w, meta = jax.vmap(lambda w, p, q, n: pl.plastic_update(w, w, w, p, q, n, CFG.init_meta_tau, CFG))(w, pre, post, nm)
+    w, meta = jax.vmap(lambda w, p, q, gt: pl.plastic_update(w, w, w, p, q, gt, g, CFG.dt))(w, pre, post, gate)
     assert w.shape == meta.shape == (VMAP_BATCH, 4, 3)
 
 
 def _vmap_neuromod() -> None:
+    from _birth import birth_genome
+
     from creature.substrate import neuromod as nmod
 
-    gain, tau = jnp.asarray(CFG.nm_gain_init), jnp.asarray(CFG.nm_tau_init)
+    g = birth_genome()
     x = jnp.zeros(VMAP_BATCH)
-    nm = jax.vmap(lambda v: nmod.step_neuromod(nmod.init_neuromod(CFG), v, v, v, v, gain, tau, CFG))(x)
-    assert nm.shape == (VMAP_BATCH, CFG.n_neuromod)
+    st = jax.vmap(lambda v: nmod.step_neuromod(nmod.init_neuromod(g), v, v, v, v, g, CFG.dt))(x)
+    assert st.nm.shape == (VMAP_BATCH, CFG.n_neuromod)
+    assert jax.vmap(nmod.plasticity_gate)(st.nm).shape == (VMAP_BATCH,)
 
 
 # Every SPEC 7 module with per-organism state or computation. None = not yet

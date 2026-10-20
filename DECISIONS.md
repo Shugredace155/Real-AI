@@ -128,3 +128,29 @@ Format: what was ambiguous, what was chosen, why.
 
 ### D30. Projected genome dimension
 - With the PCN fixed: P = 80,886 inherited synapses (W_down 37,696 + W_lat 42,793 + biases 397; W_up excluded per D19). `init_w`, `log_lr` and `meta_tau` are each (P,), so 3P = 242,658, plus the small vectors. That leaves ≈ 57k headroom under the 300k bound for any inherited policy/latent-dynamics weights in step 5; if exceeded, SPEC 13 #2 (low-rank `init_w`) applies.
+
+## Step 3 revision — tonic + |valence| DA, floored plasticity gate (author's direction)
+
+### D31. DA is tonic plus |valence|; every gate factor is floored (resolves D26)
+- DA is tonic plus |valence|, unsigned. Signed valence is preserved in telemetry and will drive an eligibility trace in Phase 2, since an unsigned gate cannot do delayed credit assignment.
+- CORT mildly suppresses plasticity by design, so chronic stress produces reduced learning and learned helplessness becomes an observable failure mode rather than a designed-away one.
+- Every factor in the plasticity gate carries an additive floor because a multiplicative gate over neuromodulators is otherwise a chain of vetoes. Minimum gate = 0.10 · 1.0 · 0.30 · 0.30 = 0.009 (`test_gate_never_zero`).
+- New genome field `da_tonic` (1,), prior uniform on [0.1, 1.0] (`Config.da_tonic_prior`). `outer/genome.py` (step 7) must include it; until then tests use the stand-in `tests/_birth.py`.
+- `knobs(nm)` now lives in `substrate/neuromod.py` (SPEC 7.6 placed the mapping in `agent/policy.py`) and is the I5 check: every channel moves at least one knob by > 1e-3. Once the policy exists, I5 should also probe the action distribution.
+
+### D32. Adaptations made while implementing D31
+- **Oja term kept row-wise.** The directed code repeats SPEC's `w * jnp.outer(post, post)`, which only broadcasts for square `w` (D22). Kept `post²[:, None] · w`.
+- **`nm_tau` floored at `dt`** (kept from D25). The directed code divides by `g.nm_tau` directly; the floor only matters if evolution produces a time constant below 1 ms, where the Euler step would overshoot.
+- **Constants are module-level**, as directed (`DA_FLOOR`, `META_DECAY`, knob offsets, …), departing from SPEC 12's "everything in config.py". Knob offsets/scales were given names rather than inline literals. The superseded Config fields (`meta_decay`, `cort_plasticity_suppression`, `nm_init`, `nm_max`, `sht_arousal_ref`, `cort_pred_err_threshold`) were removed.
+- **`init_log_lr` 1.0 → 0.0**: log learning rates are now clipped to [−12, 0], so 1.0 would be clipped to 0 anyway. Birth lr is 1/s.
+- **`apply_delta` takes the gate** (computed once per step) like `plastic_update`; the PCN routes its deltas through it the same way.
+- **`test_gate_zero_freezes`**: "meta unchanged" is read as "meta never rises". Passive decay (synapses reopening) runs regardless of the gate by design, so a nonzero meta drifts down. The test starts from nonzero meta and asserts weights are bit-identical and meta never increases.
+
+### D33. OPEN — `test_forgetting_resistance` fails under the new criterion
+- **Criterion as directed:** task A for 10⁴ steps, then task B for 10⁴ steps; A's error after B must be ≤ 1.3 × its post-A error.
+- **Result at birth defaults** (contradicting task from D24, birth gate 0.594): A error 3.236 → 0.885 after A (only 73% learned) → 1.420 after B, a ratio of 1.60. **Fails.**
+- **The ratio is vacuous on its own:** a synapse that barely learns A also barely forgets it (ratio → 1). The test therefore also requires that A be ≥ 90% learned; without that guard, raising hardening makes the test pass by making the organism a statue. Where A *is* learned well, post-A error ≈ 0, so any interference at all fails the ratio.
+- **META_DECAY is not the lever:** a sweep shows larger decay *reduces* retention (share of A's improvement kept after B, at `meta_tau` 0.3: 0.66 / 0.64 / 0.46 / 0.00 for decay 0.001 / 0.01 / 0.1 / 1.0), because decay is what lets hardened synapses reopen.
+- **Learning budget shrank:** lr is capped at 1/s and the birth gate is 0.594, so 10⁴ steps give ≈ 6 lr·s of learning, versus ≈ 54 under D24's setup. That is why A is no longer fully learned in one phase.
+- A literal pass exists only in a narrow corner (target noise 0.5, an independent rather than contradicting B, `meta_tau` 0.3: ratio 1.25 with A 93% learned). Choosing that would be tuning the test to the answer, so it was not adopted. Needs the author's decision.
+- `test_forgetting_needs_metaplasticity` (hardening forgets less than no hardening) still passes.
