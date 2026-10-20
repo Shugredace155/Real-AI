@@ -282,3 +282,14 @@ Format: what was ambiguous, what was chosen, why.
 
 ### D56. I9 entry points
 - Only the `main()` of the two programs (`outer/evolve.py`, Phase 1; `handoff.py`, Phase 2) may mint a root key from a seed; the rest of those files, and every other module, must receive keys. `test_rng_explicit` enforces this per function.
+
+### D57. RESULT of the first tuning run — evolution found the "dark room" (OPEN; needs a decision)
+- **Run:** `preset("tune")`, 40 generations, population 16, 2 worlds × 30 s lives, seed 0 (~43 min on 4 CPU cores).
+- **Fitness rose:** parent 4.10 → 5.86, best candidate 4.28 → 5.99. survival 1.0, robustness ≈ 0.99, learn_speed 0.51 → 0.88–1.0.
+- **But competence stayed ≈ 0** (−0.03 … +0.009 against the resting twin), so the Growth Ratio is not meaningful (it flips among −1, 0 and 1 when competence ≈ 0). **It did not land in [0.40, 0.60].**
+- **What evolved:** the organism rests 92% of the time (prior: 9%), mean speed 0.13 vs 0.84 m/s, and its prediction error falls to 0.0004. Stillness makes the world almost perfectly predictable, so `learn_speed`, the 3×-weighted term, approaches 1 without anything having been learned. This is the classic dark-room failure of surprise-minimizing agents, and the fitness currently pays for it.
+- **Contributing causes, with proposed fixes:**
+  1. *learn_speed rewards self-induced predictability.* Measure it relative to a naive predictor on the same stream (e.g. pred_err / error of "next obs = this obs"), or on a fixed probe sequence independent of behavior.
+  2. *The twin shares the organism's prediction-error stream* (D53), so the boredom (novelty drive → 0) of a dark-room organism is cancelled in the advantage. Exclude novelty and safety from the twin comparison, or give the twin a fixed reference novelty.
+  3. *30 s lives are too short for hunger* at `metabolic_scale = 0.05` (resting starves at ~200 s), so foraging is never needed. The SPEC's 200 s lives (`full` preset) would create the pressure but need far more compute.
+- The full run (Phase 1f) should not start until these are decided: as configured, evolution would produce a statue that is still, not one that is rigid.
