@@ -173,3 +173,43 @@ Format: what was ambiguous, what was chosen, why.
 ### D37. Extra affect tests
 - `test_valence_is_rate_per_second` (valence is in units of 1/s, independent of dt) and `test_eating_feels_good_starving_feels_bad` (sandbox → homeostat → affect integration).
 - Invariants I6 (`test_valence_is_derivative`) and I7 (`test_affect_from_body`) are now real tests. I7 checks signatures, that affect and neuromod import only jax/flax/typing, and that no function takes a text-typed argument.
+
+## Step 5 — agent/policy.py, agent/selfmodel.py, creature/organism.py
+
+### D38. `metabolic_scale = 0.01` (deviation from SPEC 7.2 rates; Phase 1e lever)
+- At SPEC rates (rest 0.1/s … manipulate 0.8/s) a newborn with a full energy store and an exploring policy starved in 2.1 s. No learning can happen in a 2-second life, so the developmental program (SPEC 1, 7.13) is impossible at those rates; D11 had flagged this.
+- All metabolic costs are now multiplied by `Config.metabolic_scale = 0.01`, keeping the SPEC table's ratios: resting starvation takes ≈ 17 min, full manipulation ≈ 2 min. `test_metabolic_cost_matches_table` and `test_starvation` check both the SPEC rates (scale 1) and the configured scale.
+
+### D39. New file `creature/organism.py` (not in the SPEC 6 layout)
+- Holds the `Endowment` (the inherited phenotype, glossary "Endowment"), the `Organism` state, `spawn`, and `step`, the SPEC 5.1 control loop. `fitness.py` and `handoff.py` both need this loop, and putting it in either would make the other import across the Phase 1 / Phase 2 boundary. `organism.py` never imports `creature.outer`.
+- Loop order is exactly SPEC 5.1, with one added step 0: the world advances under the action currently held, before `sense`. The SPEC loop has no world step.
+- Per-step keys are `fold_in(life_key, t)`, a pure function of the clock, so a restored life draws identical randomness (for I4).
+- A dead organism's gate is 0 and it rests; its brain no longer learns.
+
+### D40. Policy: motor primitives, held for a policy period, scored by a learned forward model
+- **Candidates:** SPEC 7.10's `linspace(-1, 1, N)[:, None] * ones((1, ACT_DIM))` sets thrust = turn = manipulate = vocalize, a degenerate one-dimensional repertoire. Replaced by 10 motor primitives (`Config.motor_primitives`: rest, forward, back, turn L/R, forward-turn L/R, grab, approach-grab, vocalize).
+- **Temporal abstraction:** a chosen primitive is held for `policy_period = 100` steps (100 ms). At 1 ms per step, a single step's effect on drives is below noise, so a forward model at the raw timestep could not distinguish actions. Holding a motor primitive for 100 ms is not turn-taking: the clock still runs every millisecond (SPEC 3).
+- **Forward model** (`predict_rollout` in the SPEC): a single linear layer over [tanh(z), action one-hot, one-hot ⊗ tanh(z[:8])], predicting per-period change of latent, change of the homeostatic error vector, mean caregiver proximity and mean prediction error. It is learned once per completed period by a local delta rule through `apply_delta` (I2), with the gate and metaplasticity. Its initial weights are inherited (genome `init_w`).
+- **Latent world state** z = the first latent PCN layer (`act[1]`), the layer that directly explains the senses.
+- **Score:** G = Σ_h w_h (|e_h|₁ + intrinsic_w[0]·pe_h − social_weight·prox_h), with w_h ∝ discount^h normalized. `discount` can exceed 1 (5HT up to 2 gives 1.3), meaning the far future outweighs the near; the normalization keeps G's scale fixed.
+- **Reflexes** (genome `reflex`, R = A·(1 + n_drives) = 70): a per-action bias plus a drive-error → action weight matrix, added to the logits. These are the inherited instincts.
+- **intrinsic_w** has K = 1: the weight on expected prediction error in G (negative = curious, seeks the unknown).
+
+### D41. Self-model inputs include the current body state and the efference copy
+- `self_net(state)` sees [drives, body-frame velocity, nm, tanh(z), last action]. Without the current velocity it could never predict the next one, and an external shove was indistinguishable from normal motion (shoved 0.269 vs free 0.248). With it: 0.115 vs 0.032 (`test_distinguishes_agency`).
+- Outputs: the next motor vector and the next body state [drives, velocity]. Lived: zero at birth, delta rule at `selfmodel_lr` × gate, no metaplasticity.
+
+### D42. Bug fix: impact damage needs a speed threshold
+- Pressing against a wall re-clamped a ~4 mm/s outward velocity every step, which the impact term turned into ≈ 0.2 integrity/s of continuous damage; it killed the organism within 30 s. Only collisions faster than `impact_threshold = 0.2` m/s now hurt.
+
+### D43. Episodic memory built in step 5 (needed by the loop); storage details
+- Key = all latent layers at the start of a trace (384 floats); value = the last `episodic_seq_len = 5` observations, which sleep replays as a sequence (SPEC 7.9 "through time"). Written every step from step 5 on; earlier windows are written with zero encoding.
+- Age is write time plus a buffer clock, so `tick` is O(1) instead of O(capacity) per millisecond.
+- Replay uses `jax.random.categorical` over salience logits (unwritten slots are −inf), which is equivalent to the SPEC's `choice(p=softmax(...))`.
+
+### D44. Fitness task score is "health" against species reference setpoints
+- `health = alive · (1 − mean|drives − Config.setpoint_init|)`. It is measured against fixed reference setpoints, not the evolved ones, so evolution cannot raise competence by moving its own goalposts. Used by fitness (`competence`, `robustness`) and the growth ratio.
+
+### D45. I5 checks behavior; I3 implemented
+- I5: NE, 5HT and OT must also change the action distribution (DA, ACh and CORT act through plasticity, precision and memory encoding).
+- I3: no function in the package takes a mode flag, and the newborn's first step changes its PCN weights.

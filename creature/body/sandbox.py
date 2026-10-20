@@ -269,7 +269,9 @@ def step_world(world: World, action: jnp.ndarray, key: jax.Array, cfg: Config) -
     # --- hazard: damage scales with how deeply the body overlaps it ---
     d_h = jnp.linalg.norm(world.hazard_pos - a_pos)
     in_hazard = jnp.clip((p.hazard_radius + p.agent_radius - d_h) / p.agent_radius, 0.0, 1.0)
-    damage = cfg.hazard_damage_rate * in_hazard + cfg.impact_damage_gain * impact / dt
+    # Only real collisions hurt: pressing against a wall re-clamps a tiny outward speed every step.
+    hurt = jnp.maximum(impact - cfg.impact_threshold, 0.0)
+    damage = cfg.hazard_damage_rate * in_hazard + cfg.impact_damage_gain * hurt / dt
 
     # --- food: manipulating the nearest stocked patch within reach ingests from it ---
     d_f = jnp.linalg.norm(world.food_pos - a_pos, axis=-1) - p.food_radius - p.agent_radius

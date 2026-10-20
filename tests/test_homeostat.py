@@ -2,6 +2,8 @@
 
 from collections.abc import Callable
 
+import dataclasses
+
 import jax
 import jax.numpy as jnp
 import pytest
@@ -12,6 +14,7 @@ from creature.config import Config
 from creature.substrate import pcn
 
 CFG = Config()
+SPEC_RATES = dataclasses.replace(CFG, metabolic_scale=1.0)  # the SPEC 7.2 table, unscaled
 REST = jnp.zeros(CFG.act_dim)
 
 
@@ -108,12 +111,24 @@ def test_boredom_requires_learning() -> None:
 
 
 def test_starvation() -> None:
+    # At SPEC rates the worst case for survival is resting: 1 / 0.1 per s = 10 s = 10^4 steps.
+    # At the configured metabolic_scale the same death takes 1 / scale times longer.
     w = sb.randomize_world(jax.random.key(4), CFG)
     w = w.replace(food_amount=jnp.zeros(CFG.n_food), params=w.params.replace(food_regrow=jnp.zeros(())))
-    # Worst case for survival is resting (lowest cost): 1 / 0.1 per s = 10 s = 10^4 steps.
-    h, _ = _live(w, REST, 20_000, lambda t, o: jnp.zeros(()), keep_alive=False)
-    assert float(h.drives[hs.ENERGY]) == 0.0
-    assert not bool(h.alive)
+
+    def run(cfg, steps):
+        def body(h, k):
+            nonlocal w
+            h = hs.step_homeostat(h, REST, w, jnp.zeros(()), cfg)
+            return h.replace(drives=h.drives.at[hs.INTEGRITY].set(1.0)), None
+
+        return jax.jit(lambda h: jax.lax.scan(body, h, None, length=steps)[0])(hs.init_homeostat(cfg))
+
+    h = run(SPEC_RATES, 20_000)
+    assert float(h.drives[hs.ENERGY]) == 0.0 and not bool(h.alive)
+    resting_life = 1.0 / (CFG.metabolic_scale * CFG.metabolic_cost_rest)  # seconds
+    h = run(CFG, int(1.01 * resting_life / CFG.dt))
+    assert float(h.drives[hs.ENERGY]) == 0.0 and not bool(h.alive)
 
 
 def test_ingestion_refills_energy() -> None:
@@ -131,10 +146,12 @@ def test_metabolic_cost_matches_table() -> None:
     def one_hot(i: int) -> jnp.ndarray:
         return jnp.zeros(CFG.act_dim).at[i].set(1.0)
 
-    assert float(hs.metabolic_cost(REST, CFG)) == pytest.approx(CFG.metabolic_cost_rest)
-    assert float(hs.metabolic_cost(one_hot(sb.THRUST), CFG)) == pytest.approx(CFG.metabolic_cost_locomote)
-    assert float(hs.metabolic_cost(one_hot(sb.MANIPULATE), CFG)) == pytest.approx(CFG.metabolic_cost_manipulate)
-    assert float(hs.metabolic_cost(one_hot(sb.VOCALIZE), CFG)) == pytest.approx(CFG.metabolic_cost_vocalize)
+    c = SPEC_RATES
+    assert float(hs.metabolic_cost(REST, c)) == pytest.approx(c.metabolic_cost_rest)
+    assert float(hs.metabolic_cost(one_hot(sb.THRUST), c)) == pytest.approx(c.metabolic_cost_locomote)
+    assert float(hs.metabolic_cost(one_hot(sb.MANIPULATE), c)) == pytest.approx(c.metabolic_cost_manipulate)
+    assert float(hs.metabolic_cost(one_hot(sb.VOCALIZE), c)) == pytest.approx(c.metabolic_cost_vocalize)
+    assert float(hs.metabolic_cost(REST, CFG)) == pytest.approx(CFG.metabolic_scale * c.metabolic_cost_rest)
 
 
 def test_every_drive_losable() -> None:

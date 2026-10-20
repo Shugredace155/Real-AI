@@ -37,9 +37,27 @@ def test_local_only_awake() -> None:
     _pending("I2", "the full awake step (SPEC 5.1) and memory/sleep.py (SPEC 7.9)")
 
 
+MODE_FLAGS = {"train", "training", "is_training", "eval", "evaluate", "eval_mode", "deterministic", "inference"}
+
+
 def test_no_eval_mode() -> None:
-    """I3: no train/test split; learning is continuous from timestep 0."""
-    _pending("I3", "the full awake step (SPEC 5.1)")
+    """I3: no train/test split; learning is continuous from timestep 0.
+
+    No function in the package takes a mode flag, and the newborn's very first
+    waking step already changes its weights.
+    """
+    from _small import SMALL
+
+    from creature import organism as O
+    from creature.body import sandbox as sb
+
+    for path in sorted(PACKAGE.rglob("*.py")):
+        for fn in (n for n in ast.walk(ast.parse(path.read_text())) if isinstance(n, ast.FunctionDef)):
+            args = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
+            assert not args & MODE_FLAGS, f"{path.name}:{fn.name} takes a mode flag {args & MODE_FLAGS}"
+    g = O.default_endowment(jax.random.key(0), SMALL)
+    org, _, _ = O.step(O.spawn(g, SMALL), sb.randomize_world(jax.random.key(1), SMALL), jax.random.key(2), SMALL)
+    assert any(float(jnp.abs(a - b).max()) > 0 for a, b in zip(jax.tree.leaves(org.pcn), jax.tree.leaves(g.pcn_init)))
 
 
 def test_continuity() -> None:
@@ -226,6 +244,38 @@ def _vmap_affect() -> None:
     assert v.shape == a.shape == e.shape == (VMAP_BATCH,)
 
 
+def _vmap_policy() -> None:
+    from creature import organism as O
+    from creature.agent import policy as pol
+    from creature.substrate import neuromod as nmod
+
+    g = O.default_endowment(jax.random.key(0), CFG)
+    z = jnp.zeros((VMAP_BATCH, pol.z_dim(CFG)))
+    keys = jax.random.split(jax.random.key(1), VMAP_BATCH)
+    kn = nmod.knobs(jnp.ones(CFG.n_neuromod))
+    e = jnp.zeros(CFG.n_drives)
+    a, logits = jax.vmap(lambda z, k: pol.policy(pol.init_dyn(CFG), z, e, kn, g, CFG, k))(z, keys)
+    assert a.shape == (VMAP_BATCH,) and logits.shape == (VMAP_BATCH, pol.n_actions(CFG))
+
+
+def _vmap_selfmodel() -> None:
+    from creature.agent import selfmodel as sm
+
+    p = sm.init_selfmodel(CFG)
+    s = jnp.zeros((VMAP_BATCH, sm.self_input_dim(CFG)))
+    err = jax.vmap(lambda s: sm.self_model(p, s, jnp.zeros(CFG.act_dim), jnp.zeros(sm.self_state_dim(CFG))))(s)
+    assert err.shape == (VMAP_BATCH,)
+
+
+def _vmap_episodic() -> None:
+    from creature.memory.episodic import Episodic
+
+    ep = jax.vmap(lambda _: Episodic.create(16, 3, 5))(jnp.arange(VMAP_BATCH))
+    ep = jax.vmap(lambda e, x: e.write(jnp.full(3, x), jnp.full(5, x), x, x).tick(CFG.dt))(ep, jnp.arange(VMAP_BATCH) * 1.0)
+    k, v, _ = jax.vmap(lambda e, r: e.replay_batch(r, 4, CFG))(ep, jax.random.split(jax.random.key(0), VMAP_BATCH))
+    assert k.shape == (VMAP_BATCH, 4, 3) and v.shape == (VMAP_BATCH, 4, 5)
+
+
 # Every SPEC 7 module with per-organism state or computation. None = not yet
 # implemented, which fails. evolve.py and handoff.py are drivers that vmap
 # these modules rather than being vmapped themselves (DECISIONS D13).
@@ -236,9 +286,9 @@ VMAP_CHECKS: dict[str, Callable[[], None] | None] = {
     "substrate.plasticity": _vmap_plasticity,
     "substrate.neuromod": _vmap_neuromod,
     "affect.core": _vmap_affect,
-    "agent.policy": None,
-    "agent.selfmodel": None,
-    "memory.episodic": None,
+    "agent.policy": _vmap_policy,
+    "agent.selfmodel": _vmap_selfmodel,
+    "memory.episodic": _vmap_episodic,
     "memory.sleep": None,
     "outer.genome": None,
     "outer.fitness": None,

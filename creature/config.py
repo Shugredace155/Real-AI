@@ -82,7 +82,8 @@ class Config:
     food_capacity: float = 1.0  # maximum food held by a patch, in energy units
     ingest_rate: float = 1.0  # energy gained per second while fully manipulating a stocked patch
     hazard_damage_rate: float = 0.5  # integrity lost per second fully inside the hazard
-    impact_damage_gain: float = 0.05  # integrity lost per m/s of collision speed
+    impact_damage_gain: float = 0.05  # integrity lost per m/s of collision speed above the threshold
+    impact_threshold: float = 0.2  # m/s; slower contact (resting, pushing against a wall) does no damage
     proximity_scale: float = 1.0  # distance over which caregiver proximity falls by 1/e, m
 
     # --- homeostat (SPEC 7.2) ---
@@ -90,6 +91,7 @@ class Config:
     metabolic_cost_locomote: float = 0.5  # energy/s at full locomotion (SPEC METABOLIC_COST['locomote'])
     metabolic_cost_manipulate: float = 0.8  # energy/s at full manipulation (SPEC METABOLIC_COST['manipulate'])
     metabolic_cost_vocalize: float = 0.3  # energy/s at full vocalization (SPEC METABOLIC_COST['vocalize'])
+    metabolic_scale: float = 0.01  # multiplies every metabolic cost; SPEC rates starve an active newborn in ~2 s (DECISIONS D38)
     thermal_k: float = 0.2  # body-temperature relaxation rate toward ambient, 1/s
     thermal_action_gain: float = 0.05  # body heat produced per second at full locomotion
     repair_rate: float = 0.01  # passive integrity repair per second
@@ -121,3 +123,47 @@ class Config:
     # --- affect (SPEC 7.7); birth defaults the genome later evolves ---
     setpoint_init: tuple[float, ...] = (0.8, 0.5, 1.0, 0.6, 0.4, 0.8)  # preferred drive levels at birth, DRIVES order
     urgency_init: tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # weight of each drive's error at birth
+
+    # --- policy: active inference over motor primitives (SPEC 7.10) ---
+    motor_primitives: tuple[tuple[float, float, float, float], ...] = ((0.0, 0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), (-0.5, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0), (0.0, -1.0, 0.0, 0.0), (1.0, 0.5, 0.0, 0.0), (1.0, -0.5, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0), (0.3, 0.0, 1.0, 0.0), (0.0, 0.0, 0.0, 1.0))  # candidate actions: rest, fwd, back, left, right, fwd-left, fwd-right, grab, approach-grab, vocalize
+    policy_period: int = 100  # steps a chosen primitive is held (100 ms); also the forward model's prediction step
+    policy_horizon: int = 4  # forward-model rollout depth, in policy periods
+    dyn_interaction_dims: int = 8  # latent dims crossed with the action one-hot in forward-model features
+    n_intrinsic: int = 1  # intrinsic weights: [epistemic value of expected prediction error]
+    progress_tau_fast: float = 1.0  # s, fast running average of pred_err for learning progress
+    progress_tau_slow: float = 10.0  # s, slow running average; progress = max(slow − fast, 0)
+
+    # --- self-model (SPEC 7.11); lived, never inherited ---
+    selfmodel_lr: float = 1.0  # learning rate per second, scaled by the plasticity gate
+
+    # --- episodic memory (SPEC 7.8) ---
+    episodic_seq_len: int = 5  # observations per trace; sleep replays them as a sequence
+    episodic_sal_decay: float = 1e-3  # 1/s decay of salience with trace age
+    episodic_temp: float = 1.0  # softmax temperature of salience-weighted replay
+
+    # --- sleep (SPEC 7.9) ---
+    sleep_lr: float = 0.01  # SGD step size for consolidation
+    sleep_grad_clip: float = 1.0  # global gradient-norm clip per consolidation step
+    prune_threshold: float = 1e-4  # synapses with |w| below this are removed
+
+    # --- fitness (SPEC 7.13, 9) ---
+    fitness_bin_steps: int = 1000  # trajectory statistics are accumulated in bins of this many steps
+    dev_episodic_capacity: int = 2048  # episodic capacity during developmental evaluation (memory-bound under vmap)
+    perturb_scale: tuple[float, float] = (0.5, 1.5)  # body perturbation: multiplicative range on mass, thrust, turn
+    reject_fitness: float = -10.0  # fitness assigned to a rejected (degenerate) genome (SPEC 9.2)
+    statue_plasticity: float = 1e-3  # gate·lr below this counts as a step with no plasticity
+    statue_fraction: float = 0.9  # reject if plasticity is absent on more than this fraction of steps
+    trivial_err: float = 0.05  # reject if total homeostatic error at birth is below this (setpoints trivially met)
+
+    # --- evolution (SPEC 7.14) ---
+    es_sigma_init: float = 0.05  # initial mutation scale
+    es_lr: float = 0.02  # mean update step size
+    es_sigma_bounds: tuple[float, float] = (1e-3, 0.5)  # sigma is clipped to this range
+    es_success_target: float = 0.2  # 1/5 success rule: target fraction of candidates beating the last mean fitness
+    es_sigma_damping: float = 10.0  # damping of the success-rule sigma update
+
+    # --- telemetry and Phase 2 (SPEC 7.15, 7.16) ---
+    growth_window: int = 10_000  # steps per competence estimate; growth ratio is logged this often
+    checkpoint_period: int = 100_000  # Phase 2 steps between life-state checkpoints
+    log_period: int = 1_000  # Phase 2 steps between telemetry flushes
+    birth_seed: int = 0  # the single seed of the one Phase 2 life

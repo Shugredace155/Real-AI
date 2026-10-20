@@ -54,7 +54,8 @@ def metabolic_cost(action: jnp.ndarray, cfg: Config) -> jnp.ndarray:
     The SPEC's METABOLIC_COST table names a cost per discrete action. Actions
     here are continuous, so the cost interpolates linearly from the resting
     cost toward each effector's cost by that effector's intensity; a pure
-    single-effector action at full intensity reproduces the table exactly.
+    single-effector action at full intensity reproduces the table exactly, times
+    `cfg.metabolic_scale` (DECISIONS D38).
 
     Args:
         action: (act_dim,) motor vector.
@@ -64,7 +65,7 @@ def metabolic_cost(action: jnp.ndarray, cfg: Config) -> jnp.ndarray:
     """
     _, _, locomote, manipulate, vocalize = effectors(action)
     rest = cfg.metabolic_cost_rest
-    return (
+    return cfg.metabolic_scale * (
         rest
         + (cfg.metabolic_cost_locomote - rest) * locomote
         + (cfg.metabolic_cost_manipulate - rest) * manipulate
