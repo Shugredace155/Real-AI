@@ -226,3 +226,30 @@ Format: what was ambiguous, what was chosen, why.
 
 ### D47. New file `creature/life.py` (not in the SPEC 6 layout)
 - Schedules a life: `lax.scan` over waking steps, binned statistics, and sleep every `sleep_period` steps. It is shared by fitness (batched, static schedule) and handoff (one organism). It cannot live in `organism.py` without that module importing sleep, which I2's test forbids for the waking step.
+
+## Step 7 — outer/genome.py, outer/fitness.py, outer/evolve.py
+
+### D48. Genome encoding and expression
+- Fields are SPEC 7.12's plus `da_tonic` (D31). Genes are stored unconstrained so one mutation scale suits all; `express` decodes them into the `Endowment`: `meta_tau` and `nm_tau` are log-encoded (exp, with the log clipped to ±20 so no constant is 0 or ∞), setpoints clipped to [0, 1], urgency to ≥ 0, `da_tonic` to [0, NM_MAX].
+- Inherited synapses (`init_w`, `log_lr`, `meta_tau`, each (P,)) = PCN W_down, W_lat, biases, plus the forward model. W_up is not a gene: it is born as W_downᵀ (D19), and its rates and hardening are W_down's transposed.
+- **Genome dimension: 276,234** = 3 × 92,046 synapses + 96 scalars (≤ 300k; SPEC 13 #2 low-rank not needed).
+- `init_genome` (the prior) = Config birth defaults, random initial weights, `da_tonic ~ U(0.1, 1.0)`.
+
+### D49. Fitness term definitions
+- **Task score** is `organism.health` (D44); `competence` = last-quarter health. `competence at birth` (for the growth ratio) = first-quarter health of the same life.
+- **robustness** = last-quarter health / health in the quarter before the body perturbation, clipped to [0, 1]. The perturbation, at dev_steps/2, scales mass, thrust and turn rate each by U(0.5, 1.5). Per-evaluation morphology randomization (SPEC 9.2) is already done by `randomize_world`.
+- **curiosity** = mean learning progress, max(slow − fast running average of pred_err, 0). It is deliberately not multiplied by any gene, so a genome cannot inflate it by turning up a weight.
+- **hack** = fraction of life with gate·lr < `statue_plasticity` + [mean homeostatic error < `trivial_err`].
+- **Rejection** (SPEC 9.2): fitness := `reject_fitness` (−10) if plasticity is absent on > 90% of life, or if homeostatic error at birth is below `trivial_err`.
+- Statistics are accumulated in bins of `fitness_bin_steps`; quarters are taken over bins. Developmental lives use `dev_episodic_capacity = 2048` because many lives run at once.
+
+### D50. Evolution strategy (deviations from the SPEC sketch)
+- Isotropic ES, as in SPEC 7.14's code. True CMA-ES needs a 276k × 276k covariance.
+- **Mean step ∝ σ, not ∝ 1/σ:** `mean += es_lr · σ · (εᵀ r) / pop`. With the SPEC's `/ (pop · σ)` and an adaptive σ, the step grows as σ shrinks and the run diverged on a test landscape (improved for 80 generations, then degraded). `es_lr = 2.0` is CMA's c_m = 1 under centered ranks; parent fitness then rises monotonically in every 40-generation window.
+- **σ adaptation:** the 1/5th success rule against the *parent* (the mean genome, evaluated each generation in the same worlds). Comparing against last generation's average candidate always gives ≈ 50% success, so σ grew without bound.
+- **SPEC fix:** the sketch draws ε from the same `rng` every generation; keys are `fold_in(root, gen)`, which also makes checkpoint resume bit-identical.
+- Common random numbers: all candidates and the parent share the generation's worlds. Candidates are evaluated with `lax.map` in batches of `eval_batch` to bound memory.
+
+### D51. Invariant tests for whole-life modules
+- I8 is tested as SPEC 2 states it, "enforced by fitness weighting": a genome inheriting a whole life's learned weights with plasticity off loses to the adaptive genome it came from, and every fitness evaluation reports a growth ratio.
+- I10 vmap checks for sleep and fitness use batches of 8 and 2 (each element is a night of consolidation or whole lives); SPEC 10's 1024 is used for every per-step module.

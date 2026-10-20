@@ -8,9 +8,9 @@ them into the `Endowment` the organism is born with:
                 W_lat, biases; forward model). W_up is not a gene: it is born
                 as W_downᵀ (DECISIONS D19).
     log_lr      per-synapse log learning rate (clipped in plasticity.py)
-    meta_tau    per-synapse log hardening constant      -> exp
+    meta_tau    per-synapse log hardening constant      -> exp (clipped)
     nm_gain     neuromodulator driver gains             -> as is
-    nm_tau      log neuromodulator time constants       -> exp
+    nm_tau      log neuromodulator time constants       -> exp (clipped)
     setpoint    drive setpoints                         -> clip [0, 1]
     urgency     drive urgencies                         -> max(·, 0)
     intrinsic_w intrinsic weights                       -> as is
@@ -33,6 +33,7 @@ from jax.flatten_util import ravel_pytree
 
 from creature import organism as O
 from creature.agent import policy as pol
+from creature.body import sandbox as sb
 from creature.config import Config
 from creature.substrate import neuromod as nmod
 from creature.substrate import pcn
@@ -49,9 +50,14 @@ class Inherited:
 
 
 def _template(cfg: Config) -> Inherited:
-    shapes = O.default_endowment(jax.random.key(0), cfg)
-    p = shapes.pcn_init
-    return Inherited(W_down=p.W_down, W_lat=p.W_lat, b=p.b, dyn=shapes.dyn_init)
+    """Zero-valued Inherited tree; only its shapes matter (no randomness needed)."""
+    sizes = pcn.pcn_sizes(sb.obs_dim(cfg), cfg)
+    return Inherited(
+        W_down=tuple(jnp.zeros((sizes[l], sizes[l + 1])) for l in range(len(sizes) - 1)),
+        W_lat=tuple(jnp.zeros((n, n)) for n in sizes[:-1]),
+        b=tuple(jnp.zeros(n) for n in sizes[:-1]),
+        dyn=pol.init_dyn(cfg),
+    )
 
 
 def _unravel(cfg: Config):
@@ -137,10 +143,17 @@ def _pcn_tree(inh: Inherited) -> pcn.PCNParams:
     return pcn.PCNParams(W_down=inh.W_down, W_up=tuple(w.T for w in inh.W_down), W_lat=inh.W_lat, b=inh.b)
 
 
+LOG_GENE_BOUND = 20.0  # log-encoded genes are clipped here before exp, so no time constant is 0 or inf
+
+
+def _exp(x: jnp.ndarray) -> jnp.ndarray:
+    return jnp.exp(jnp.clip(x, -LOG_GENE_BOUND, LOG_GENE_BOUND))
+
+
 def express(genome: Genome, cfg: Config) -> O.Endowment:
     """Decode the genome into the phenotype at birth (glossary: Endowment). Pure and deterministic."""
     unravel = _unravel(cfg)
-    w, lr, tau = unravel(genome.init_w), unravel(genome.log_lr), unravel(jnp.exp(genome.meta_tau))
+    w, lr, tau = unravel(genome.init_w), unravel(genome.log_lr), unravel(_exp(genome.meta_tau))
     return O.Endowment(
         pcn_init=_pcn_tree(w),
         pcn_log_lr=_pcn_tree(lr),
@@ -149,7 +162,7 @@ def express(genome: Genome, cfg: Config) -> O.Endowment:
         dyn_log_lr=lr.dyn,
         dyn_meta_tau=tau.dyn,
         nm_gain=genome.nm_gain,
-        nm_tau=jnp.exp(genome.nm_tau),
+        nm_tau=_exp(genome.nm_tau),
         da_tonic=jnp.clip(genome.da_tonic, 0.0, nmod.NM_MAX),
         setpoint=jnp.clip(genome.setpoint, 0.0, 1.0),
         urgency=jnp.maximum(genome.urgency, 0.0),

@@ -147,8 +147,23 @@ def test_affect_from_body() -> None:
 
 
 def test_genome_no_learnable_competence() -> None:
-    """I8: the genome does not encode learnable competence; monitored via Growth Ratio."""
-    _pending("I8", "outer/fitness.py and telemetry.py Growth Ratio (SPEC 7.13, 7.16, 9.3)")
+    """I8: the genome must not encode competence the individual could learn.
+
+    Enforced by fitness weighting, not by construction: a genome that inherits
+    the weights a whole life learned, but cannot learn, must lose to the plain
+    adaptive genome it came from. The Growth Ratio is reported by every
+    fitness evaluation so evolution can be monitored for drift toward statues.
+    """
+    import test_fitness as TF
+
+    from creature.outer.genome import init_genome
+
+    adaptive = init_genome(jax.random.key(6), TF.CFG)
+    rigid = TF._born_competent_rigid(adaptive)
+    a = TF.COMPONENTS(adaptive, jax.random.key(7))
+    r = TF.COMPONENTS(rigid, jax.random.key(7))
+    assert float(a["fitness"]) > float(r["fitness"])
+    assert "growth_ratio" in a and -1.0 <= float(a["growth_ratio"]) <= 1.0
 
 
 # Files allowed to mint a root PRNG key from a seed. Everything else must receive keys.
@@ -316,6 +331,31 @@ def _vmap_sleep() -> None:
     assert jax.tree.map(jnp.shape, out) == jax.tree.map(jnp.shape, gs.pcn_init)
 
 
+def _vmap_genome() -> None:
+    from _small import SMALL
+
+    from creature.outer import genome as G
+
+    gs = jax.vmap(lambda k: G.init_genome(k, SMALL))(jax.random.split(jax.random.key(0), VMAP_BATCH))
+    flat = jax.vmap(lambda g: g.flat())(gs)
+    assert flat.shape == (VMAP_BATCH, G.genome_dim(SMALL))
+    e = jax.vmap(lambda v: G.express(G.Genome.from_flat(v, SMALL), SMALL))(flat)
+    assert e.setpoint.shape == (VMAP_BATCH, SMALL.n_drives)
+
+
+def _vmap_fitness() -> None:
+    from _small import SMALL
+
+    from creature.outer import fitness as F
+    from creature.outer import genome as G
+
+    b = 2  # each evaluation is n_eval_worlds whole lives
+    cfg = dataclasses.replace(SMALL, n_eval_worlds=1)
+    gs = jax.vmap(lambda k: G.init_genome(k, cfg))(jax.random.split(jax.random.key(0), b))
+    fits = jax.vmap(lambda g: F.developmental_fitness(g, jax.random.key(1), cfg))(gs)
+    assert fits.shape == (b,)
+
+
 # Every SPEC 7 module with per-organism state or computation. None = not yet
 # implemented, which fails. evolve.py and handoff.py are drivers that vmap
 # these modules rather than being vmapped themselves (DECISIONS D13).
@@ -330,8 +370,8 @@ VMAP_CHECKS: dict[str, Callable[[], None] | None] = {
     "agent.selfmodel": _vmap_selfmodel,
     "memory.episodic": _vmap_episodic,
     "memory.sleep": _vmap_sleep,
-    "outer.genome": None,
-    "outer.fitness": None,
+    "outer.genome": _vmap_genome,
+    "outer.fitness": _vmap_fitness,
     "telemetry": None,
 }
 

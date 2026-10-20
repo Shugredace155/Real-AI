@@ -157,7 +157,7 @@ class Config:
 
     # --- evolution (SPEC 7.14) ---
     es_sigma_init: float = 0.05  # initial mutation scale
-    es_lr: float = 0.02  # mean update step size
+    es_lr: float = 2.0  # mean step = es_lr · sigma · mean(rank · noise); ≈ CMA c_m = 1 under centered ranks
     es_sigma_bounds: tuple[float, float] = (1e-3, 0.5)  # sigma is clipped to this range
     es_success_target: float = 0.2  # 1/5 success rule: target fraction of candidates beating the last mean fitness
     es_sigma_damping: float = 10.0  # damping of the success-rule sigma update
