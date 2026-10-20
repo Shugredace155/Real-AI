@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[test]"
+      - name: Test
+        # SPEC 10: all invariant tests must pass on every commit. Until every
+        # invariant is implemented, this job is red by design.
+        run: pytest

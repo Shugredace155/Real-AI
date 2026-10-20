@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "creature"
+version = "0.1.0"
+description = "PROJECT CREATURE: a continuously-living synthetic organism (see SPEC.md)"
+requires-python = ">=3.12"
+dependencies = [
+    "jax[cpu]==0.12.0",
+    "flax==0.12.10",
+]
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1"]
+
+[tool.setuptools.packages.find]
+include = ["creature*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
