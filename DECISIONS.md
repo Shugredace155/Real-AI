@@ -253,3 +253,10 @@ Format: what was ambiguous, what was chosen, why.
 ### D51. Invariant tests for whole-life modules
 - I8 is tested as SPEC 2 states it, "enforced by fitness weighting": a genome inheriting a whole life's learned weights with plasticity off loses to the adaptive genome it came from, and every fitness evaluation reports a growth ratio.
 - I10 vmap checks for sleep and fitness use batches of 8 and 2 (each element is a night of consolidation or whole lives); SPEC 10's 1024 is used for every per-step module.
+
+## Step 8 — telemetry.py
+
+### D52. Telemetry details
+- `row(org, info)` produces exactly the SPEC 7.16 fields. `weight_norm` is over all PCN weights; `mean_meta` is the mean PCN metaplastic state; `lr_mean` is the mean effective PCN learning rate after hardening.
+- Growth Ratio: competence = mean health (D44). Birth = the first `growth_window` (10⁴) steps; now = the latest complete window. It is NaN (undefined) until two windows exist, then clipped to [−1, 1] with the denominator floored at 10⁻⁶, so it is always defined and bounded once reported.
+- `TelemetryStore` writes one `np.savez_compressed` file per flushed chunk and reads them back in order.

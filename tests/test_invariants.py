@@ -356,6 +356,24 @@ def _vmap_fitness() -> None:
     assert fits.shape == (b,)
 
 
+def _vmap_telemetry() -> None:
+    from _small import SMALL
+
+    from creature import organism as O
+    from creature import telemetry as tm
+    from creature.body import sandbox as sb
+
+    b = 64  # rows are taken from whole organisms
+    gs = jax.vmap(lambda k: O.default_endowment(k, SMALL))(jax.random.split(jax.random.key(0), b))
+    orgs = jax.vmap(lambda g: O.spawn(g, SMALL))(gs)
+    worlds = jax.vmap(lambda k: sb.randomize_world(k, SMALL))(jax.random.split(jax.random.key(1), b))
+    orgs, _, info = jax.vmap(lambda o, w, k: O.step(o, w, k, SMALL))(orgs, worlds, jax.random.split(jax.random.key(2), b))
+    rows = jax.vmap(tm.row)(orgs, info)
+    assert rows["pred_err"].shape == (b,) and rows["drives"].shape == (b, SMALL.n_drives)
+    gr = jax.vmap(lambda h: tm.update_growth(tm.init_growth(), h, jnp.asarray(0), SMALL))(jnp.ones(VMAP_BATCH))
+    assert gr.ratio.shape == (VMAP_BATCH,)
+
+
 # Every SPEC 7 module with per-organism state or computation. None = not yet
 # implemented, which fails. evolve.py and handoff.py are drivers that vmap
 # these modules rather than being vmapped themselves (DECISIONS D13).
@@ -372,7 +390,7 @@ VMAP_CHECKS: dict[str, Callable[[], None] | None] = {
     "memory.sleep": _vmap_sleep,
     "outer.genome": _vmap_genome,
     "outer.fitness": _vmap_fitness,
-    "telemetry": None,
+    "telemetry": _vmap_telemetry,
 }
 
 
