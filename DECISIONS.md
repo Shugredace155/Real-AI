@@ -74,3 +74,57 @@ Format: what was ambiguous, what was chosen, why.
 
 ### D17. Extra test files and tests
 - `tests/test_sandbox.py`, `tests/test_homeostat.py` (SPEC 6 lists neither). Added beyond the acceptance list: `test_observation_is_low_level`, `test_bodies_stay_in_arena`, `test_ingestion_refills_energy`, `test_metabolic_cost_matches_table`, `test_every_drive_losable`, `test_dead_stays_dead`.
+
+## Step 3 — substrate/pcn.py, substrate/plasticity.py, substrate/neuromod.py
+
+### D18. PCN layers: the observation is layer 0, `layer_sizes` are the latent layers
+- **Ambiguity:** `layer_sizes = (64, 128, 128, 64)` but the observation is 77-dimensional.
+- **Choice:** Layer widths are `(obs_dim,) + layer_sizes` = (77, 64, 128, 128, 64). Layer 0 is clamped to the observation; the top layer (64) is a free latent with a Gaussian prior (`pcn_top_prior`).
+
+### D19. `W_up` is a learned feedback matrix (Kolen–Pollack); not inherited
+- **Ambiguity:** SPEC 7.4 says "two weight matrices" per layer but its code uses three (`W_down`, `W_lat`, `W_up`), and `W_up[l] += outer(act[l], errors[l])` has an inconsistent index.
+- **Choice:** `W_up[l]` (n_{l+1}, n_l) carries errors bottom-up during relaxation instead of reading `W_down[l]ᵀ` across layers. It receives exactly the transpose of `W_down`'s update (`outer(φ(act[l+1]), err[l])`, i.e. the SPEC's line with the index corrected), and both decay at `pcn_weight_decay`, so any mismatch shrinks exponentially (`test_w_up_tracks_transpose`). It is born as `W_down[l]ᵀ` and is not a separate gene: with it, the genome would be ≈ 356k > 300k.
+- **Implication for sleep (step 6):** sleep updates `W_down`; the shared decay re-aligns `W_up` afterwards, at rate `lr · pcn_weight_decay` (≈ 0.027/s at birth). Revisit if that is too slow.
+
+### D20. One PCN timestep: top-down sweep, then K relaxation iterations
+- Each timestep the latent layers start at their prior prediction (top-down sweep from the top latent, which persists between steps, plus lateral context), then relax for `pcn_inference_steps = 5` iterations. This is the Whittington & Bogacz scheme and makes errors exactly 0 above the sensory layer before relaxation.
+- `pred_err` (fed to affect and the drives) is the mean squared *prior* sensory error, the surprise before the observation is explained away. The returned `errors` are post-relaxation and are the learning signal.
+- `precision` is an explicit argument (ACh-gated by the policy knobs in step 5), applied to errors in both inference and learning.
+- Biases were added (the SPEC's sketch has none); without them a constant input cannot be predicted.
+
+### D21. Two update entry points
+- `pcn_deltas` returns per-second local learning signals shaped like the params. The awake loop routes these through `plasticity.apply_delta` (gate + metaplasticity). `pcn_update` is the plain, ungated `params + dt·lr·deltas` and is used to test the learning algorithm itself.
+
+### D22. Oja term is row-wise
+- **Ambiguity:** SPEC 7.5's `w * jnp.outer(post, post)` only broadcasts when `w` is square.
+- **Choice:** Oja's rule as published: `outer(post, pre) − post²[:, None] · w`.
+
+### D23. Metaplasticity hardens on *expressed* plasticity (deviation)
+- **SPEC:** `meta += dt·(|hebb|/meta_tau − meta·META_DECAY)`, which hardens even while the gate is closed.
+- **Choice:** `meta += dt·(|gate·delta|/meta_tau − meta·meta_decay)`. A synapse "used" = a synapse that changed. This makes `test_neuromod_gates` exact (DA = 0 freezes weights *and* metaplastic state; meta only relaxes) and stops a statue genome (gate ≈ 0) from hardening anyway.
+
+### D24. Forgetting resistance: tested with the error-driven rule
+- **Finding:** with the Oja rule, metaplasticity cannot give ≥ 70% retention *and* learn task B. Oja normalizes each row, so learning B on shared postsynaptic units *requires* eroding A, and hardening only trades speed for retention (scan: retention ≥ 0.7 only where B reached ≤ 0.3).
+- **Choice:** `test_forgetting_resistance` uses `apply_delta` with an error-driven delta (the rule the PCN uses). Task B (`[c, c] → −M c`) directly contradicts task A (`[a, 0] → M a`) on the shared half but has many solutions. Without metaplasticity, A retains 0.00; with the birth defaults it retains 0.71–0.75 across 5 seeds while learning B to ≥ 0.98. The margin over 0.70 is thin; `meta_tau` is evolved per synapse.
+- Birth defaults changed to make this hold: `init_log_lr = 1.0` (was 0.0), `init_meta_tau = 0.1` (was 1.0).
+
+### D25. Neuromodulator details
+- `step_neuromod` takes `nm_gain` and `nm_tau` explicitly (the SPEC's `g`). Thresholds (`cort_pred_err_threshold = 0.3`, `sht_arousal_ref = 0.5`) and the CORT suppression factor are in `Config`.
+- Time constants below `dt` are floored at `dt`, so an evolved `nm_tau` can never make the Euler step overshoot.
+- Birth levels `nm_init = (0.5, 0.5, 0.5, 0.5, 0.5, 0)`; birth time constants (0.2, 5, 0.1, 0.5, 10, 20) s span 200×.
+
+### D26. OPEN CONCERN — DA-gated plasticity is ~0 by default (not changed; needs a decision)
+- Per SPEC, DA's target is `clip(valence, −1, 1) · gain` and levels are clipped at 0. Valence is a derivative (I6), so at steady state DA → 0, and during worsening (negative valence) DA → 0 as well. The plasticity gate is *linear* in DA, so **the organism learns only while its homeostatic error is actively falling**. In a stable or deteriorating situation it is a statue, which works against `learn_speed` (SPEC 7.13).
+- Not changed, because it is a design question rather than an ambiguity. Candidate fixes for step 5 / Phase 1e: (a) a tonic DA baseline `target = nm_base + drive · gain` with an evolved `nm_base`; (b) drive DA with `|valence|` (salience) instead of signed valence; (c) leave as is and let evolution raise `nm_gain`.
+
+### D27. I5 probes
+- `tests/_causal.py` maps each channel to the knobs it gates. DA, NE, ACh and CORT are causal now through the plasticity gate. 5HT (discount) and OT (caregiver weight) have no knob until `agent/policy.py`, so their I5 checks fail as pending.
+
+### D28. Boredom now uses the real PCN (supersedes D16)
+- `test_boredom` runs the real PCN online in a static world. `info_gain` raised 1 → 10 because an untrained PCN's surprise is ≈ 0.05; at gain 1 novelty fell below 0.1 even with learning off, so the test was vacuous. Added `test_boredom_requires_learning`: with plasticity off, novelty stays above 0.1.
+
+### D29. Extra tests (beyond the acceptance list)
+- PCN: `test_relaxation_assigns_credit`, `test_learns_temporal_sequence`, `test_w_up_tracks_transpose`. Plasticity: `test_meta_reopens`, `test_forgetting_needs_metaplasticity`. Neuromod: `test_tracks_driver`, `test_timescales_order_response`. Homeostat: `test_boredom_requires_learning`.
+
+### D30. Projected genome dimension
+- With the PCN fixed: P = 80,886 inherited synapses (W_down 37,696 + W_lat 42,793 + biases 397; W_up excluded per D19). `init_w`, `log_lr` and `meta_tau` are each (P,), so 3P = 242,658, plus the small vectors. That leaves ≈ 57k headroom under the 300k bound for any inherited policy/latent-dynamics weights in step 5; if exceeded, SPEC 13 #2 (low-rank `init_w`) applies.

@@ -9,6 +9,7 @@ import pytest
 from creature.body import homeostat as hs
 from creature.body import sandbox as sb
 from creature.config import Config
+from creature.substrate import pcn
 
 CFG = Config()
 REST = jnp.zeros(CFG.act_dim)
@@ -68,26 +69,42 @@ def test_drives_bounded() -> None:
     assert float(lo) >= 0.0 and float(hi) <= 1.0
 
 
-def test_boredom() -> None:
-    # Stand-in for the PCN until SPEC 7.4 exists: an exponential running average
-    # of the observation predicts the next one, so in a static world its error
-    # falls toward 0 — the world "becomes predictable".
-    rate = 0.01
+def _bored_run(lr: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Static world, resting organism, real PCN learning online at `lr` (ungated)."""
     world = _static_world(jax.random.key(2))
+    params, pstate = pcn.init_pcn(jax.random.key(3), pcn.pcn_sizes(sb.obs_dim(CFG), CFG), CFG)
+    one = jnp.array(1.0)
 
     def body(carry, k):
-        w, h, pred = carry
+        w, h, p, s = carry
         w = sb.step_world(w, REST, k, CFG)
-        obs = sb.sense(w, h.drives, CFG)
-        err = jnp.mean(jnp.abs(obs - pred))
-        h = hs.step_homeostat(h, REST, w, err, CFG)
+        out, s = pcn.pcn_forward(p, s, sb.sense(w, h.drives, CFG), one, CFG)
+        p = pcn.pcn_update(p, s, out.errors, lr, one, CFG)
+        h = hs.step_homeostat(h, REST, w, out.pred_err, CFG)
         h = h.replace(drives=h.drives.at[hs.ENERGY].set(1.0).at[hs.INTEGRITY].set(1.0))
-        return (w, h, pred + rate * (obs - pred)), h.drives[hs.NOVELTY]
+        return (w, h, p, s), (h.drives[hs.NOVELTY], out.pred_err)
 
-    init = (world, hs.init_homeostat(CFG), jnp.zeros(sb.obs_dim(CFG)))
-    keys = jax.random.split(jax.random.key(3), 100_000)
-    _, novelty = jax.jit(lambda c, ks: jax.lax.scan(body, c, ks))(init, keys)
+    init = (world, hs.init_homeostat(CFG), params, pstate)
+    keys = jax.random.split(jax.random.key(4), 100_000)
+    _, (novelty, err) = jax.jit(lambda c, ks: jax.lax.scan(body, c, ks))(init, keys)
+    return novelty, err
+
+
+def test_boredom() -> None:
+    # As the PCN learns the static world, prediction error falls, information
+    # intake falls, and novelty follows it toward 0.
+    novelty, err = _bored_run(jnp.exp(CFG.init_log_lr))
+    print(f"pred_err {float(err[:100].mean()):.4f} -> {float(err[-1000:].mean()):.6f}; "
+          f"novelty < 0.1 from step {int(jnp.argmax(novelty < 0.1))}")
+    assert float(err[-1000:].mean()) < 0.1 * float(err[:100].mean())
     assert float(novelty[-1]) < 0.1
+
+
+def test_boredom_requires_learning() -> None:
+    # Control: with plasticity off the world never becomes predictable, so the
+    # organism never gets bored. Boredom is a consequence of learning.
+    novelty, _ = _bored_run(jnp.array(0.0))
+    assert float(novelty[-1]) > 0.1
 
 
 def test_starvation() -> None:

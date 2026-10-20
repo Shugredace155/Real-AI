@@ -97,6 +97,28 @@ class Config:
     novel_k: float = 0.1  # novelty relaxation rate toward information intake, 1/s (boredom timescale)
     safety_k: float = 0.2  # safety relaxation rate toward its target, 1/s
     safety_var_gain: float = 4.0  # scales pred-err variance so safety can reach 0 (variance of [0,1] values is ≤ 0.25)
-    info_gain: float = 1.0  # scales mean recent pred-err into information intake
+    info_gain: float = 10.0  # scales mean recent pred-err into information intake; naive-PCN surprise (~0.05) maps to ~0.5
     pred_err_window: int = 256  # steps of prediction error kept for novelty and safety
     drive_init: tuple[float, ...] = (1.0, 0.5, 1.0, 0.5, 0.5, 1.0)  # drives at birth, in DRIVES order
+
+    # --- predictive coding (SPEC 7.4) ---
+    pcn_nonlinearity: str = "tanh"  # value-node nonlinearity applied before weights: "tanh" or "linear"
+    pcn_inference_steps: int = 5  # relaxation iterations per timestep
+    pcn_inference_rate: float = 0.1  # value-node step size per relaxation iteration
+    pcn_top_prior: float = 0.1  # leak of the free top layer toward 0 per iteration (Gaussian prior)
+    pcn_init_scale: float = 1.0  # birth W_down std is this / sqrt(fan_in); W_lat and biases start at 0
+    pcn_weight_decay: float = 0.01  # 1/s decay on W_down and W_up; makes W_up re-align to W_down^T (Kolen–Pollack)
+
+    # --- plasticity (SPEC 7.5); init_* are birth defaults the genome later evolves ---
+    init_log_lr: float = 1.0  # per-synapse log learning rate at birth (lr = e ≈ 2.7/s)
+    init_meta_tau: float = 0.1  # per-synapse metaplasticity hardening constant at birth
+    meta_decay: float = 1e-3  # 1/s passive metaplasticity decay; small and nonzero so unused synapses reopen
+    cort_plasticity_suppression: float = 0.5  # fraction of plasticity removed per unit CORT in the gate
+
+    # --- neuromodulation (SPEC 7.6) ---
+    nm_init: tuple[float, ...] = (0.5, 0.5, 0.5, 0.5, 0.5, 0.0)  # levels at birth: DA, 5HT, NE, ACh, OT, CORT
+    nm_gain_init: tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # birth driver gains, evolved
+    nm_tau_init: tuple[float, ...] = (0.2, 5.0, 0.1, 0.5, 10.0, 20.0)  # birth time constants in s, evolved
+    nm_max: float = 2.0  # upper clip for every channel
+    sht_arousal_ref: float = 0.5  # arousal above which 5HT is driven down (impulsivity)
+    cort_pred_err_threshold: float = 0.3  # pred_err above which arousal drives CORT (sustained stress)

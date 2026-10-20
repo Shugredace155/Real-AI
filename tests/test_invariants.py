@@ -14,8 +14,10 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import pytest
+from _causal import check_channel_causal
 
 from creature.config import Config
+from creature.substrate.neuromod import CHANNELS
 
 PACKAGE = Path(__file__).resolve().parent.parent / "creature"
 CFG = Config()
@@ -45,9 +47,13 @@ def test_continuity() -> None:
     _pending("I4", "handoff.py state serialization (SPEC 7.15)")
 
 
-def test_neuromod_causal() -> None:
-    """I5: perturbing each of the six neuromodulator channels changes behavior."""
-    _pending("I5", "substrate/neuromod.py and agent/policy.py (SPEC 7.6, 7.10)")
+@pytest.mark.parametrize("channel", range(CFG.n_neuromod), ids=CHANNELS)
+def test_neuromod_causal(channel: int) -> None:
+    """I5: clamping each neuromodulator channel to 0 vs max changes a computational parameter.
+
+    Probes live in tests/_causal.py; a channel whose knob module is not built yet fails.
+    """
+    check_channel_causal(channel)
 
 
 def test_valence_is_derivative() -> None:
@@ -133,15 +139,46 @@ def _vmap_homeostat() -> None:
     assert h.drives.shape == (VMAP_BATCH, CFG.n_drives)
 
 
+def _vmap_pcn() -> None:
+    from creature.substrate import pcn
+
+    sizes = pcn.pcn_sizes(16, CFG)
+    params, state = jax.vmap(lambda k: pcn.init_pcn(k, sizes, CFG))(jax.random.split(jax.random.key(0), VMAP_BATCH))
+    one = jnp.array(1.0)
+    out, state = jax.vmap(lambda p, s: pcn.pcn_forward(p, s, jnp.ones(sizes[0]), one, CFG))(params, state)
+    params = jax.vmap(lambda p, s, e: pcn.pcn_update(p, s, e, one, one, CFG))(params, state, out.errors)
+    assert out.pred_err.shape == (VMAP_BATCH,)
+    assert params.W_down[0].shape == (VMAP_BATCH, sizes[0], sizes[1])
+
+
+def _vmap_plasticity() -> None:
+    from creature.substrate import plasticity as pl
+
+    w = jnp.zeros((VMAP_BATCH, 4, 3))
+    nm = jnp.ones((VMAP_BATCH, CFG.n_neuromod))
+    pre, post = jnp.ones((VMAP_BATCH, 3)), jnp.ones((VMAP_BATCH, 4))
+    w, meta = jax.vmap(lambda w, p, q, n: pl.plastic_update(w, w, w, p, q, n, CFG.init_meta_tau, CFG))(w, pre, post, nm)
+    assert w.shape == meta.shape == (VMAP_BATCH, 4, 3)
+
+
+def _vmap_neuromod() -> None:
+    from creature.substrate import neuromod as nmod
+
+    gain, tau = jnp.asarray(CFG.nm_gain_init), jnp.asarray(CFG.nm_tau_init)
+    x = jnp.zeros(VMAP_BATCH)
+    nm = jax.vmap(lambda v: nmod.step_neuromod(nmod.init_neuromod(CFG), v, v, v, v, gain, tau, CFG))(x)
+    assert nm.shape == (VMAP_BATCH, CFG.n_neuromod)
+
+
 # Every SPEC 7 module with per-organism state or computation. None = not yet
 # implemented, which fails. evolve.py and handoff.py are drivers that vmap
 # these modules rather than being vmapped themselves (DECISIONS D13).
 VMAP_CHECKS: dict[str, Callable[[], None] | None] = {
     "body.sandbox": _vmap_sandbox,
     "body.homeostat": _vmap_homeostat,
-    "substrate.pcn": None,
-    "substrate.plasticity": None,
-    "substrate.neuromod": None,
+    "substrate.pcn": _vmap_pcn,
+    "substrate.plasticity": _vmap_plasticity,
+    "substrate.neuromod": _vmap_neuromod,
     "affect.core": None,
     "agent.policy": None,
     "agent.selfmodel": None,
