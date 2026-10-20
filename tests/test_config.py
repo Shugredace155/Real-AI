@@ -72,4 +72,4 @@ def test_spec_defaults() -> None:
 def test_module_has_no_global_state() -> None:
     # Only the Config class (and imports) should be public at module level.
     public = {n for n in vars(config) if not n.startswith("_")}
-    assert public <= {"Config", "dataclass", "annotations"}
+    assert public <= {"Config", "preset", "dataclass", "replace", "annotations"}

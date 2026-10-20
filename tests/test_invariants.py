@@ -28,9 +28,12 @@ def _pending(invariant: str, needs: str) -> None:
     pytest.fail(f"{invariant} not yet implemented: needs {needs}", pytrace=False)
 
 
-def test_no_pretrained() -> None:
-    """I1: no weight tensor is loaded from disk in Phase 2 except the genome."""
-    _pending("I1", "handoff.py (SPEC 7.15)")
+def test_no_pretrained(tmp_path, monkeypatch) -> None:
+    """I1: no weight tensor is loaded from disk in Phase 2 except the genome (and, on
+    crash recovery, this life's own checkpoint). See tests/test_handoff.py."""
+    import test_handoff
+
+    test_handoff.test_no_pretrained(tmp_path, monkeypatch)
 
 
 GRADIENT_APIS = {"grad", "value_and_grad", "vjp", "jvp", "jacrev", "jacfwd", "hessian", "linear_transpose"}
@@ -84,9 +87,11 @@ def test_no_eval_mode() -> None:
     assert any(float(jnp.abs(a - b).max()) > 0 for a, b in zip(jax.tree.leaves(org.pcn), jax.tree.leaves(g.pcn_init)))
 
 
-def test_continuity() -> None:
+def test_continuity(tmp_path) -> None:
     """I4: checkpoint/restore at step N produces a bit-identical continuation."""
-    _pending("I4", "handoff.py state serialization (SPEC 7.15)")
+    import test_handoff
+
+    test_handoff.test_continuity(tmp_path)
 
 
 @pytest.mark.parametrize("channel", range(CFG.n_neuromod), ids=CHANNELS)
@@ -166,13 +171,18 @@ def test_genome_no_learnable_competence() -> None:
     assert "growth_ratio" in a and -1.0 <= float(a["growth_ratio"]) <= 1.0
 
 
-# Files allowed to mint a root PRNG key from a seed. Everything else must receive keys.
-KEY_MINTERS = {"handoff.py"}
+# Entry points allowed to mint a root PRNG key from a seed: each program's `main`.
+# Everything else, including the rest of those files, must receive keys.
+KEY_MINTERS = {"handoff.py": {"main"}, "outer/evolve.py": {"main"}}
 
 
 def _rng_violations(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
     rel = path.relative_to(PACKAGE).as_posix()
+    exempt = set()
+    for fn in ast.walk(tree):
+        if isinstance(fn, ast.FunctionDef) and fn.name in KEY_MINTERS.get(rel, ()):
+            exempt |= {id(n) for n in ast.walk(fn)}
     found = []
     for node in ast.walk(tree):
         where = f"{rel}:{getattr(node, 'lineno', '?')}"
@@ -189,7 +199,7 @@ def _rng_violations(path: Path) -> list[str]:
         elif isinstance(node, ast.Attribute):
             if node.attr == "random" and isinstance(node.value, ast.Name) and node.value.id in {"np", "numpy"}:
                 found.append(f"{where} uses {node.value.id}.random")
-            if node.attr in {"key", "PRNGKey"} and rel not in KEY_MINTERS:
+            if node.attr in {"key", "PRNGKey"} and id(node) not in exempt:
                 base = node.value
                 if isinstance(base, ast.Attribute) and base.attr == "random":
                     found.append(f"{where} mints a PRNG key with random.{node.attr}")
@@ -201,7 +211,7 @@ def test_rng_explicit() -> None:
 
     Static check over the whole package: no Python `random`, no `numpy.random`,
     and no module mints its own key from a seed (keys are passed in), except the
-    single Phase 2 entry point. Determinism given a key is checked per module
+    `main` entry points of Phase 1 (evolve) and Phase 2 (handoff). Determinism given a key is checked per module
     (e.g. tests/test_sandbox.py::test_determinism).
     """
     files = sorted(PACKAGE.rglob("*.py"))

@@ -260,3 +260,25 @@ Format: what was ambiguous, what was chosen, why.
 - `row(org, info)` produces exactly the SPEC 7.16 fields. `weight_norm` is over all PCN weights; `mean_meta` is the mean PCN metaplastic state; `lr_mean` is the mean effective PCN learning rate after hardening.
 - Growth Ratio: competence = mean health (D44). Birth = the first `growth_window` (10⁴) steps; now = the latest complete window. It is NaN (undefined) until two windows exist, then clipped to [−1, 1] with the denominator floored at 10⁻⁶, so it is always defined and bounded once reported.
 - `TelemetryStore` writes one `np.savez_compressed` file per flushed chunk and reads them back in order.
+
+## Step 9 — fitness tuning (Phase 1e, reduced scale)
+
+### D53. Competence = advantage over a resting twin (changes the meaning of "task score")
+- **Finding:** with competence = health (D44), unevolved genomes scored Growth Ratio −0.04 to −0.09 and no weighting could raise it. Health measures *state*. A newborn starts healthy (birth drives are near the reference setpoints) and drifts, so "competence at birth" was starting luck, not skill, and GR was structurally ≤ 0.
+- **Choice:** each life runs alongside a resting twin (`life.Twin`): the same world, the same world randomness and the same prediction-error stream, but the body always rests. Task score = health − twin health, i.e. what behavior adds. A flailing newborn scores < 0 (it burns energy and collides), a forager > 0. Used for `competence`, `competence_birth` and the growth ratio, in fitness (Phase 1) and telemetry (Phase 2). `robustness` stays on health, because a ratio of signed advantages is unstable.
+- Consequence: a genome whose adult does no better than resting has competence ≤ 0 and growth ratio −1 (D49's clip). That is the correct verdict for a creature that never learned to do anything.
+
+### D54. Presets and the tuning regime
+- `config.preset("full")` is the SPEC configuration. `preset("tune")` is a reduced organism for CPU iteration: 8 rays, latent layers (32, 32), 2 relaxation iterations, 30 s lives, sleep every 10 s, 2 worlds, population 16.
+- Tuning uses `metabolic_scale = 0.05`. At 0.01 (D38) a 30–60 s life never gets hungry, so resting is near-optimal and behavior barely matters (competence ≈ −0.03). At 0.05 unfed organisms starve within a minute (survival 0.78, competence ≈ −0.6), so foraging is a real, learnable skill.
+- **Compute reality:** one full-preset evaluation is 8 lives × 200k steps; a generation is 513 of those; Phase 1f is 4,000 generations, on the order of 10¹² organism-steps, which needs the GPU-days SPEC 8 budgets. Only reduced-scale tuning is possible in this environment; results are in `runs/tune/evolve_tune.csv`.
+
+## Step 10 — handoff.py
+
+### D55. Phase 2 life
+- `Life` = organism + world + resting twin + growth tracker. It is born once from `species_endowment.npz`, with `birth_seed` minted into the life key only in `handoff.main`. The birth world comes from its own `fold_in` stream.
+- The life is stepped in `log_period` chunks with per-step telemetry rows (SPEC 7.16 fields + `growth_ratio` + `advantage`) and sleeps at multiples of `sleep_period`. The whole `Life` pytree is checkpointed every `checkpoint_period` steps and on exit; a restart restores it and continues at the same t (`test_continuity`: bit-identical state and telemetry).
+- `run()` loads exactly two files: the genome, and, when resuming, its own checkpoint (`test_no_pretrained`). It imports nothing from `creature.outer` except `genome` (`test_handoff_no_evolution` checks `sys.modules` in a subprocess). The SPEC's "no call into outer/" is read as "no evolution or fitness": `Genome.load` is the SPEC's own interface. Presets moved to `config.py` so Phase 2 does not import `evolve.py`.
+
+### D56. I9 entry points
+- Only the `main()` of the two programs (`outer/evolve.py`, Phase 1; `handoff.py`, Phase 2) may mint a root key from a seed; the rest of those files, and every other module, must receive keys. `test_rng_explicit` enforces this per function.

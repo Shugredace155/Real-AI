@@ -20,7 +20,7 @@ import jax.numpy as jnp
 import numpy as np
 from flax import struct
 
-from creature.config import Config
+from creature.config import Config, preset
 from creature.outer.fitness import fitness_components
 from creature.outer.genome import Genome, init_genome
 
@@ -120,3 +120,50 @@ def evolve(
         if checkpoint is not None:
             save_state(state, checkpoint)
     return state
+
+
+# --- command line: Phase 1e tuning runs and the Phase 1f full run ---------------
+
+def main() -> None:
+    import argparse
+    import csv
+    import time
+
+    ap = argparse.ArgumentParser(description="Run Phase 1 evolution and write the species endowment.")
+    ap.add_argument("--preset", default="tune", choices=("tune", "full"))
+    ap.add_argument("--generations", type=int, default=None)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", default="runs")
+    ap.add_argument("--report-every", type=int, default=5, help="evaluate the mean genome's components this often")
+    args = ap.parse_args()
+
+    cfg = preset(args.preset)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    components = jax.jit(lambda flat, k: fitness_components(Genome.from_flat(flat, cfg), k, cfg))
+    log_path = out / f"evolve_{args.preset}.csv"
+    fresh = not log_path.exists()
+    with open(log_path, "a", newline="") as fh:
+        writer = csv.writer(fh)
+        if fresh:
+            writer.writerow(["gen", "sigma", "parent_fit", "cand_mean", "cand_max", "growth_ratio", "competence",
+                             "competence_birth", "learn_speed", "survival", "robustness", "seconds"])
+        start = time.time()
+
+        def log(gen, fits, state):
+            report = gen % args.report_every == 0 or gen == 1
+            c = components(state.mean, jax.random.fold_in(jax.random.key(10_000), gen)) if report else None
+            pick = lambda k: round(float(c[k]), 4) if c is not None else ""
+            writer.writerow([gen, round(float(state.sigma), 5), round(float(state.parent_fit), 4), round(float(fits.mean()), 4),
+                             round(float(fits.max()), 4), pick("growth_ratio"), pick("competence"), pick("competence_birth"),
+                             pick("learn_speed"), pick("survival"), pick("robustness"), round(time.time() - start)])
+            fh.flush()
+
+        # The one place Phase 1 mints its root key, from the command-line seed.
+        state = evolve(cfg, jax.random.key(args.seed), args.generations, checkpoint=out / f"evolve_{args.preset}_state.npz", log=log)
+    Genome.from_flat(state.mean, cfg).save(out / "species_endowment.npz")
+    print(f"wrote {out / 'species_endowment.npz'} after {int(state.gen)} generations")
+
+
+if __name__ == "__main__":
+    main()

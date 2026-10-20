@@ -37,7 +37,7 @@ def _born_competent_rigid(adaptive: G.Genome) -> G.Genome:
     """Inherit the weights an organism learned over a life, but with plasticity switched off."""
     e = G.express(adaptive, CFG)
     org, world = O.spawn(e, CFG), sb.randomize_world(jax.random.key(4), CFG)
-    org, _, _ = jax.jit(lambda o, w: life.awake(o, w, jax.random.key(5), 40, 500, CFG))(org, world)
+    org, _, _, _ = jax.jit(lambda o, w: life.awake(o, w, jax.random.key(5), 40, 500, CFG))(org, world)
     w, _ = jax.flatten_util.ravel_pytree(G.Inherited(org.pcn.W_down, org.pcn.W_lat, org.pcn.b, org.dyn))
     return adaptive.replace(init_w=w, log_lr=jnp.full_like(adaptive.log_lr, -12.0))
 

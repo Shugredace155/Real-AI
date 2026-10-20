@@ -7,7 +7,7 @@ passed to `jax.jit` as a static argument without being traced.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -167,3 +167,17 @@ class Config:
     checkpoint_period: int = 100_000  # Phase 2 steps between life-state checkpoints
     log_period: int = 1_000  # Phase 2 steps between telemetry flushes
     birth_seed: int = 0  # the single seed of the one Phase 2 life
+
+
+def preset(name: str) -> Config:
+    """Named configurations. `full` is the SPEC configuration (Phase 1f needs a GPU and days).
+    `tune` is a reduced organism with short lives, for Phase 1e iteration on a CPU (DECISIONS D54)."""
+    if name == "full":
+        return Config()
+    if name == "tune":
+        return replace(
+            Config(), n_rays=8, layer_sizes=(32, 32), pcn_inference_steps=2, dev_steps=30_000, sleep_period=10_000,
+            sleep_replay_batch=64, sleep_consolidation_steps=50, fitness_bin_steps=1_000, n_eval_worlds=2,
+            dev_episodic_capacity=1_024, pop_size=16, metabolic_scale=0.05,
+        )
+    raise ValueError(f"unknown preset {name!r}")

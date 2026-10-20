@@ -7,7 +7,8 @@ it develops, not only on how it ends up:
 
     survival     fraction of life alive
     learn_speed  relative fall of prediction error, first → last quarter (weighted 3×: anti-statue)
-    competence   health in the last quarter (organism.health, against species reference setpoints)
+    competence   last-quarter advantage: health minus the health of a resting twin
+                 in an identical world (life.Twin), i.e. what behavior adds
     robustness   last-quarter health relative to the quarter before the body perturbation
     curiosity    mean learning progress (intrinsic reward; not scaled by any gene)
     hack         fraction of life with no plasticity + trivially low homeostatic error
@@ -54,10 +55,11 @@ def _quarters(x: jnp.ndarray) -> tuple[jnp.ndarray, ...]:
 def life_components(stats: dict, g: O.Endowment, cfg: Config) -> dict:
     """All fitness terms from one life's binned statistics."""
     first, _, before, last = _quarters(stats["pred_err"])
-    h1, _, h_before, h_last = _quarters(stats["health"])
+    _, _, h_before, h_last = _quarters(stats["health"])
+    adv1, _, _, adv_last = _quarters(stats["advantage"])
     survival = stats["alive"].mean()
     learn_speed = (first.mean() - last.mean()) / (first.mean() + EPS)  # RELATIVE
-    competence = h_last.mean()
+    competence = adv_last.mean()
     robustness = jnp.clip(h_last.mean() / (h_before.mean() + EPS), 0.0, 1.0)
     curiosity = stats["intrinsic"].mean()
     statue = (stats["plasticity"] < cfg.statue_plasticity).mean()
@@ -82,13 +84,14 @@ def life_components(stats: dict, g: O.Endowment, cfg: Config) -> dict:
         curiosity=curiosity,
         hack=hack,
         rejected=rejected.astype(jnp.float32),
-        competence_birth=h1.mean(),
-        growth_ratio=growth_ratio(h1.mean(), competence),
+        competence_birth=adv1.mean(),
+        growth_ratio=growth_ratio(adv1.mean(), competence),
     )
 
 
 def growth_ratio(competence_birth: jnp.ndarray, competence_end: jnp.ndarray) -> jnp.ndarray:
-    """SPEC 9.3: share of final competence acquired during life. Clipped to [−1, 1]."""
+    """SPEC 9.3: share of final competence acquired during life. Clipped to [−1, 1];
+    an organism with no positive final competence scores −1."""
     return jnp.clip((competence_end - competence_birth) / jnp.maximum(competence_end, EPS), -1.0, 1.0)
 
 
@@ -111,7 +114,8 @@ def fitness_components(genome: Genome, rng: jax.Array, cfg: Config) -> dict:
         env = sb.randomize_world(k_world, dcfg)
         agent = O.spawn(g, dcfg)
         bump = lambda o, w, t: (o, perturb(w, k_perturb, dcfg))
-        _, _, stats = life.live(agent, env, k_life, 0, dcfg.dev_steps, dcfg.fitness_bin_steps, dcfg, bump, (half,))
+        twin = life.make_twin(env, dcfg)
+        _, _, stats = life.live(agent, env, k_life, 0, dcfg.dev_steps, dcfg.fitness_bin_steps, dcfg, bump, (half,), twin)
         return life_components(stats, g, dcfg)
 
     per_world = jax.vmap(one_world)(jax.random.split(rng, cfg.n_eval_worlds))

@@ -22,7 +22,7 @@ LIFE = jax.random.key(1)
 def _lived(steps: int) -> O.Organism:
     """An organism that has been awake `steps` steps (no sleep yet)."""
     org, world = O.spawn(O.default_endowment(jax.random.key(0), CFG), CFG), sb.randomize_world(jax.random.key(2), CFG)
-    org, _, _ = jax.jit(lambda o, w: life.awake(o, w, LIFE, steps // 100, 100, CFG))(org, world)
+    org, _, _, _ = jax.jit(lambda o, w: life.awake(o, w, LIFE, steps // 100, 100, CFG))(org, world)
     return org
 
 
