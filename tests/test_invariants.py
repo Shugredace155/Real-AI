@@ -58,12 +58,50 @@ def test_neuromod_causal(channel: int) -> None:
 
 def test_valence_is_derivative() -> None:
     """I6: valence is the time derivative of homeostatic error, never its level."""
-    _pending("I6", "affect/core.py (SPEC 7.7)")
+    from _birth import birth_genome
+
+    from creature.affect import core as affect
+
+    g = birth_genome()
+    dt = CFG.dt
+    feel = lambda d, prev: affect.step_affect(d, prev, affect.error_magnitude(prev, g), g, dt)[0]
+    below = jnp.clip(g.setpoint - 0.3, 0.0, 1.0)  # every drive below its setpoint
+    nudge = jnp.zeros(CFG.n_drives).at[0].set(1e-3)  # energy moves toward its setpoint
+
+    # Same level now, different history -> different valence.
+    assert float(feel(below, below - nudge)) > 0 > float(feel(below, below + nudge))
+    # Different levels, same change -> same valence.
+    v_far, v_near = feel(below + nudge, below), feel(below + 0.1 + nudge, below + 0.1)
+    assert float(v_far) == pytest.approx(float(v_near), rel=1e-2)
+    # Any constant body, comfortable or not, feels exactly nothing.
+    for d in jax.random.uniform(jax.random.key(0), (100, CFG.n_drives)):
+        assert float(feel(d, d)) == 0.0
 
 
 def test_affect_from_body() -> None:
-    """I7: affect is a pure function of body state, with no label/string/prompt input."""
-    _pending("I7", "affect/core.py (SPEC 7.7)")
+    """I7: affect is a pure function of body state, with no label/string/prompt input.
+
+    Valence and arousal take only drive vectors and evolved setpoints. The
+    neuromodulator drivers take only affect outputs, the organism's own
+    prediction error and caregiver proximity (a body-contact signal).
+    """
+    import inspect
+
+    from creature.affect import core as affect
+    from creature.substrate import neuromod as nmod
+
+    assert list(inspect.signature(affect.step_affect).parameters) == ["drives", "prev_drives", "prev_err_mag", "g", "dt"]
+    assert list(inspect.signature(nmod.neuromod_target).parameters) == [
+        "valence", "arousal", "pred_err", "social_presence", "g"
+    ]
+    for path in (PACKAGE / "affect" / "core.py", PACKAGE / "substrate" / "neuromod.py"):
+        tree = ast.parse(path.read_text())
+        mods = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        mods |= {(n.module or "").split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+        assert mods <= {"jax", "flax", "typing", "__future__"}, f"{path.name} imports {mods}"
+        for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
+            for arg in fn.args.args:
+                assert not (arg.annotation and "str" in ast.unparse(arg.annotation)), f"{fn.name}({arg.arg}) takes text"
 
 
 def test_genome_no_learnable_competence() -> None:
@@ -176,6 +214,18 @@ def _vmap_neuromod() -> None:
     assert jax.vmap(nmod.plasticity_gate)(st.nm).shape == (VMAP_BATCH,)
 
 
+def _vmap_affect() -> None:
+    from _birth import birth_genome
+
+    from creature.affect import core as affect
+
+    g = birth_genome()
+    d = jnp.full((VMAP_BATCH, CFG.n_drives), 0.5)
+    e = jax.vmap(lambda d: affect.error_magnitude(d, g))(d)
+    v, a, e = jax.vmap(lambda d, p, e: affect.step_affect(d, p, e, g, CFG.dt))(d, d, e)
+    assert v.shape == a.shape == e.shape == (VMAP_BATCH,)
+
+
 # Every SPEC 7 module with per-organism state or computation. None = not yet
 # implemented, which fails. evolve.py and handoff.py are drivers that vmap
 # these modules rather than being vmapped themselves (DECISIONS D13).
@@ -185,7 +235,7 @@ VMAP_CHECKS: dict[str, Callable[[], None] | None] = {
     "substrate.pcn": _vmap_pcn,
     "substrate.plasticity": _vmap_plasticity,
     "substrate.neuromod": _vmap_neuromod,
-    "affect.core": None,
+    "affect.core": _vmap_affect,
     "agent.policy": None,
     "agent.selfmodel": None,
     "memory.episodic": None,

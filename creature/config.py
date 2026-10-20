@@ -117,3 +117,7 @@ class Config:
     nm_gain_init: tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # birth driver gains, evolved
     nm_tau_init: tuple[float, ...] = (0.2, 5.0, 0.1, 0.5, 10.0, 20.0)  # birth time constants in s, evolved
     da_tonic_prior: tuple[float, float] = (0.1, 1.0)  # uniform prior on the evolved tonic DA level (genome da_tonic)
+
+    # --- affect (SPEC 7.7); birth defaults the genome later evolves ---
+    setpoint_init: tuple[float, ...] = (0.8, 0.5, 1.0, 0.6, 0.4, 0.8)  # preferred drive levels at birth, DRIVES order
+    urgency_init: tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # weight of each drive's error at birth

@@ -154,3 +154,22 @@ Format: what was ambiguous, what was chosen, why.
 - **Learning budget shrank:** lr is capped at 1/s and the birth gate is 0.594, so 10⁴ steps give ≈ 6 lr·s of learning, versus ≈ 54 under D24's setup. That is why A is no longer fully learned in one phase.
 - A literal pass exists only in a narrow corner (target noise 0.5, an independent rather than contradicting B, `meta_tau` 0.3: ratio 1.25 with A 93% learned). Choosing that would be tuning the test to the answer, so it was not adopted. Needs the author's decision.
 - `test_forgetting_needs_metaplasticity` (hardening forgets less than no hardening) still passes.
+
+### D34. Forgetting resistance measured as retention of improvement (resolves D33)
+- **Author's choice:** `retention = (initial − A error after B) / (initial − A error after A) ≥ 0.70`, with 10⁴ steps per task at the birth gate.
+- Kept a looser non-vacuity guard: A must be ≥ 50% learned, since a synapse that barely learns also barely forgets.
+- Result at birth defaults: A 70–74% learned, retention 0.77–0.78 across 5 seeds (B contradicts A). Without metaplasticity A is wiped out (control test).
+
+## Step 4 — affect/core.py
+
+### D35. Affect follows SPEC 7.7 exactly, plus a birth helper
+- `step_affect` is the SPEC code. Added `error_magnitude(drives, g)` so the caller can seed `prev_err_mag` at birth. Otherwise the first valence would be `−err_mag/dt`, a huge spurious spike rather than a derivative.
+- Birth setpoints `(0.8, 0.5, 1.0, 0.6, 0.4, 0.8)` and urgencies (all 1) are `Config.setpoint_init` / `urgency_init`; the genome evolves them (step 7). `tests/_birth.py` carries them until then.
+- Error is `|drive − setpoint|`, symmetric, so surplus counts as error: at birth energy is 1.0 > setpoint 0.8, so burning energy down toward 0.8 has positive valence. This is what the SPEC formula implies; noted, not changed.
+
+### D36. Concern — the arousal "change" term is negligible (not changed)
+- `arousal = tanh(Σ|drives − prev_drives| + err_mag)`. The change term is per timestep, so O(dt) ≈ 10⁻⁴, while `err_mag` is O(1); arousal is effectively `tanh(err_mag)`, a level. The glossary defines arousal as "magnitude of *unpredicted* change plus drive urgency". Candidates for Phase 1e: use the rate `Σ|Δdrives|/dt`, or the organism's own prediction error, as the change term.
+
+### D37. Extra affect tests
+- `test_valence_is_rate_per_second` (valence is in units of 1/s, independent of dt) and `test_eating_feels_good_starving_feels_bad` (sandbox → homeostat → affect integration).
+- Invariants I6 (`test_valence_is_derivative`) and I7 (`test_affect_from_body`) are now real tests. I7 checks signatures, that affect and neuromod import only jax/flax/typing, and that no function takes a text-typed argument.
