@@ -34,3 +34,69 @@ class Config:
     w_robustness: float = 2.0  # weight on recovery after body perturbation (SPEC 9.1)
     w_curiosity: float = 0.5  # weight on mean intrinsic reward; the anti-plateau term (SPEC 9.1)
     w_hack: float = 0.5  # penalty weight on exploit magnitude, subtracted (SPEC 9.1)
+
+    # --- sandbox: layout and senses (SPEC 7.3) ---
+    arena_half_width: float = 5.0  # half side of the square arena in metres; walls at ±this
+    spawn_margin: float = 0.5  # minimum distance from walls for anything placed at spawn
+    n_objects: int = 4  # movable inert objects per world
+    n_food: int = 3  # regrowing food patches per world (the only energy source)
+    n_rays: int = 16  # egocentric vision rays
+    ray_fov: float = 4.0  # total vision field of view in radians, centred on heading
+    ray_range: float = 6.0  # max ray distance in metres; beyond it a ray sees nothing
+    act_dim: int = 4  # motor vector: [thrust, turn, manipulate, vocalize], each in [-1, 1]
+    # entity base colours (RGB) the rays report; per-world jitter is added on top
+    color_wall: tuple[float, float, float] = (0.5, 0.5, 0.5)  # arena walls
+    color_object: tuple[float, float, float] = (0.2, 0.3, 0.8)  # movable objects
+    color_food: tuple[float, float, float] = (0.2, 0.8, 0.2)  # food patches, dimmed as they deplete
+    color_caregiver: tuple[float, float, float] = (0.9, 0.7, 0.3)  # caregiver agent
+    color_hazard: tuple[float, float, float] = (0.9, 0.1, 0.1)  # hazard
+    color_jitter: float = 0.1  # std of per-world Gaussian colour jitter
+    food_dim_floor: float = 0.3  # brightness of an empty food patch relative to a full one
+
+    # --- sandbox: per-world randomization ranges, (lo, hi) uniform (SPEC 7.3, 9.2) ---
+    friction_range: tuple[float, float] = (0.5, 2.0)  # linear velocity damping, 1/s
+    agent_mass_range: tuple[float, float] = (0.8, 1.2)  # body mass in kg (morphology jitter)
+    agent_radius_range: tuple[float, float] = (0.18, 0.22)  # body radius in m (morphology jitter)
+    max_thrust_range: tuple[float, float] = (3.0, 5.0)  # force at full thrust, N
+    max_turn_range: tuple[float, float] = (2.5, 3.5)  # turn rate at full turn, rad/s
+    obj_mass_range: tuple[float, float] = (0.5, 3.0)  # movable object mass, kg
+    obj_radius_range: tuple[float, float] = (0.15, 0.35)  # movable object radius, m
+    food_radius_range: tuple[float, float] = (0.25, 0.35)  # food patch radius, m
+    food_regrow_range: tuple[float, float] = (0.01, 0.05)  # food regrowth, capacity units/s
+    hazard_radius_range: tuple[float, float] = (0.4, 0.8)  # hazard radius, m
+    cg_gain_range: tuple[float, float] = (0.5, 2.0)  # caregiver approach gain toward preferred distance, 1/s
+    cg_pref_dist_range: tuple[float, float] = (0.5, 1.5)  # caregiver preferred distance from the organism, m
+    cg_wander_range: tuple[float, float] = (0.1, 0.5)  # caregiver wander-velocity noise scale, m/s
+    cg_voc_response_range: tuple[float, float] = (0.0, 2.0)  # extra approach speed per unit vocalization, m/s
+    cg_max_speed_range: tuple[float, float] = (0.5, 1.5)  # caregiver speed cap, m/s
+    cg_warmth_range: tuple[float, float] = (0.0, 0.3)  # ambient warmth the caregiver adds at zero distance
+    ambient_base_range: tuple[float, float] = (0.3, 0.7)  # ambient temperature at arena centre, [0, 1]
+    ambient_amp_range: tuple[float, float] = (0.1, 0.5)  # ambient change from centre to wall along the gradient
+
+    # --- sandbox: fixed physics (SPEC 7.3) ---
+    cg_radius: float = 0.25  # caregiver body radius, m
+    cg_wander_theta: float = 1.0  # mean-reversion rate of caregiver wander velocity, 1/s
+    warmth_scale: float = 1.0  # distance over which caregiver warmth falls by 1/e, m
+    reach: float = 0.3  # manipulation reach beyond the body surface, m
+    grasp_k: float = 5.0  # spring gain pulling a grasped object toward the mouth, 1/s^2
+    food_capacity: float = 1.0  # maximum food held by a patch, in energy units
+    ingest_rate: float = 1.0  # energy gained per second while fully manipulating a stocked patch
+    hazard_damage_rate: float = 0.5  # integrity lost per second fully inside the hazard
+    impact_damage_gain: float = 0.05  # integrity lost per m/s of collision speed
+    proximity_scale: float = 1.0  # distance over which caregiver proximity falls by 1/e, m
+
+    # --- homeostat (SPEC 7.2) ---
+    metabolic_cost_rest: float = 0.1  # energy/s at rest (SPEC METABOLIC_COST['rest'])
+    metabolic_cost_locomote: float = 0.5  # energy/s at full locomotion (SPEC METABOLIC_COST['locomote'])
+    metabolic_cost_manipulate: float = 0.8  # energy/s at full manipulation (SPEC METABOLIC_COST['manipulate'])
+    metabolic_cost_vocalize: float = 0.3  # energy/s at full vocalization (SPEC METABOLIC_COST['vocalize'])
+    thermal_k: float = 0.2  # body-temperature relaxation rate toward ambient, 1/s
+    thermal_action_gain: float = 0.05  # body heat produced per second at full locomotion
+    repair_rate: float = 0.01  # passive integrity repair per second
+    social_k: float = 0.5  # social-drive relaxation rate toward caregiver proximity, 1/s
+    novel_k: float = 0.1  # novelty relaxation rate toward information intake, 1/s (boredom timescale)
+    safety_k: float = 0.2  # safety relaxation rate toward its target, 1/s
+    safety_var_gain: float = 4.0  # scales pred-err variance so safety can reach 0 (variance of [0,1] values is ≤ 0.25)
+    info_gain: float = 1.0  # scales mean recent pred-err into information intake
+    pred_err_window: int = 256  # steps of prediction error kept for novelty and safety
+    drive_init: tuple[float, ...] = (1.0, 0.5, 1.0, 0.5, 0.5, 1.0)  # drives at birth, in DRIVES order
