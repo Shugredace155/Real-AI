@@ -142,7 +142,7 @@ class Config:
     episodic_temp: float = 1.0  # softmax temperature of salience-weighted replay
 
     # --- sleep (SPEC 7.9) ---
-    sleep_lr: float = 0.01  # SGD step size for consolidation
+    sleep_lr: float = 1.0  # SGD step size for consolidation (scan: 0.01 → 0.92x surprise, 0.1 → 0.67x, 1.0 → 0.12x after 200 steps)
     sleep_grad_clip: float = 1.0  # global gradient-norm clip per consolidation step
     prune_threshold: float = 1e-4  # synapses with |w| below this are removed
 

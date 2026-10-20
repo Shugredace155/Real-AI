@@ -213,3 +213,16 @@ Format: what was ambiguous, what was chosen, why.
 ### D45. I5 checks behavior; I3 implemented
 - I5: NE, 5HT and OT must also change the action distribution (DA, ACh and CORT act through plasticity, precision and memory encoding).
 - I3: no function in the package takes a mode flag, and the newborn's first step changes its PCN weights.
+
+## Step 6 — memory/sleep.py, creature/life.py
+
+### D46. What sleep consolidates and how
+- **Replay unit:** a trace = the latent state at its start + 5 consecutive observations (D43). Sleep restores that latent state and lets the PCN re-live the sequence exactly as when awake (prior prediction, relaxation), and `replay_loss` is the mean prior surprise. `jax.grad` differentiates through the sequence (through time, via lateral weights and the persistent top latent) and through the relaxation iterations.
+- **Optimizer:** plain SGD with global-norm clipping (`sleep_grad_clip = 1.0`). `sleep_lr = 1.0` after a scan on a lived organism (200 steps): 0.01 → 0.92× replayed surprise, 0.1 → 0.67×, 1.0 → 0.12×, with recent-experience surprise falling equally (0.13×), so nothing recent was sacrificed.
+- **SPEC fix:** the SPEC's loop reuses one `rng` for every consolidation step (so it replays the same batch 200 times); the key is split per step.
+- **Pruning:** |w| < `prune_threshold` in W_down and W_lat is set to 0; biases are not pruned. Pruned synapses can regrow through waking plasticity. Then W_up := W_down ᵀ exactly, resolving the slow re-alignment concern in D19.
+- **Not consolidated:** the forward model and the self-model (the replay traces hold no action-outcome periods). The SPEC diagram's SLEEP → LAT edge is therefore only through the PCN latents.
+- **Sleep takes no world time:** the world is paused while the organism consolidates. The metaplastic state and learning rates are untouched by sleep.
+
+### D47. New file `creature/life.py` (not in the SPEC 6 layout)
+- Schedules a life: `lax.scan` over waking steps, binned statistics, and sleep every `sleep_period` steps. It is shared by fitness (batched, static schedule) and handoff (one organism). It cannot live in `organism.py` without that module importing sleep, which I2's test forbids for the waking step.

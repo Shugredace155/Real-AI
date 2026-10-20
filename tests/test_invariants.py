@@ -7,6 +7,7 @@ so an unimplemented invariant can never read as green.
 """
 
 import ast
+import dataclasses
 import importlib
 from collections.abc import Callable
 from pathlib import Path
@@ -32,9 +33,32 @@ def test_no_pretrained() -> None:
     _pending("I1", "handoff.py (SPEC 7.15)")
 
 
+GRADIENT_APIS = {"grad", "value_and_grad", "vjp", "jvp", "jacrev", "jacfwd", "hessian", "linear_transpose"}
+
+
 def test_local_only_awake() -> None:
-    """I2: no gradient call anywhere in the awake step; backprop only in sleep.py."""
-    _pending("I2", "the full awake step (SPEC 5.1) and memory/sleep.py (SPEC 7.9)")
+    """I2: no gradient call anywhere in the awake step; backprop only in sleep.py.
+
+    Every gradient API in the package appears only in memory/sleep.py, and the
+    waking step (organism.step) never references sleep.
+    """
+    users = []
+    for path in sorted(PACKAGE.rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        names = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        names |= {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        names |= {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
+        if names & GRADIENT_APIS:
+            users.append(path.relative_to(PACKAGE).as_posix())
+    assert users == ["memory/sleep.py"], users
+    organism = ast.parse((PACKAGE / "organism.py").read_text())
+    step = next(n for n in organism.body if isinstance(n, ast.FunctionDef) and n.name == "step")
+    referenced = {n.id for n in ast.walk(step) if isinstance(n, ast.Name)} | {
+        n.attr for n in ast.walk(step) if isinstance(n, ast.Attribute)
+    }
+    assert not {"sleep", "sl", "consolidate_bptt"} & referenced
+    imported = {(n.module or "") for n in organism.body if isinstance(n, ast.ImportFrom)}
+    assert "creature.memory.sleep" not in imported
 
 
 MODE_FLAGS = {"train", "training", "is_training", "eval", "evaluate", "eval_mode", "deterministic", "inference"}
@@ -276,6 +300,22 @@ def _vmap_episodic() -> None:
     assert k.shape == (VMAP_BATCH, 4, 3) and v.shape == (VMAP_BATCH, 4, 5)
 
 
+def _vmap_sleep() -> None:
+    from _small import SMALL
+
+    from creature import organism as O
+    from creature.memory import sleep as sl
+    from creature.memory.episodic import Episodic
+
+    b = 8  # a night of consolidation per organism is heavy; batch kept small
+    gs = jax.vmap(lambda k: O.default_endowment(k, SMALL))(jax.random.split(jax.random.key(0), b))
+    dk, dv = O.latent_dim(SMALL), SMALL.episodic_seq_len * (O.sb.obs_dim(SMALL))
+    ep = jax.vmap(lambda _: Episodic.create(4, dk, dv).write(jnp.zeros(dk), jnp.ones(dv), 1.0, 1.0))(jnp.arange(b))
+    cfg = dataclasses.replace(SMALL, sleep_consolidation_steps=2, sleep_replay_batch=2)
+    out = jax.vmap(lambda p, e, k: sl.sleep(p, e, k, cfg))(gs.pcn_init, ep, jax.random.split(jax.random.key(1), b))
+    assert jax.tree.map(jnp.shape, out) == jax.tree.map(jnp.shape, gs.pcn_init)
+
+
 # Every SPEC 7 module with per-organism state or computation. None = not yet
 # implemented, which fails. evolve.py and handoff.py are drivers that vmap
 # these modules rather than being vmapped themselves (DECISIONS D13).
@@ -289,7 +329,7 @@ VMAP_CHECKS: dict[str, Callable[[], None] | None] = {
     "agent.policy": _vmap_policy,
     "agent.selfmodel": _vmap_selfmodel,
     "memory.episodic": _vmap_episodic,
-    "memory.sleep": None,
+    "memory.sleep": _vmap_sleep,
     "outer.genome": None,
     "outer.fitness": None,
     "telemetry": None,
