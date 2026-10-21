@@ -23,4 +23,5 @@ SMALL = dataclasses.replace(
     pop_size=8,
     n_eval_worlds=2,
     growth_window=1_000,
+    metabolic_scale=0.01,  # mechanism tests run long lives; keep starvation out of them
 )

@@ -66,7 +66,7 @@ def live_chunk(lv: Life, life_key: jax.Array, n_steps: int, cfg: Config) -> tupl
     def body(c, _):
         key = O.step_key(life_key, c.org.t)
         org, world, info = O.step(c.org, c.world, key, cfg)
-        twin, twin_health = life._twin_step(c.twin, key, info["pred_err"], cfg)
+        twin, twin_health = life.twin_step(c.twin, key, cfg)
         growth = tm.update_growth(c.growth, info["health"] - twin_health, c.org.t, cfg)
         r = dict(tm.row(org, info), growth_ratio=growth.ratio, advantage=info["health"] - twin_health)
         return Life(org=org, world=world, twin=twin, growth=growth), r

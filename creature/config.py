@@ -91,7 +91,7 @@ class Config:
     metabolic_cost_locomote: float = 0.5  # energy/s at full locomotion (SPEC METABOLIC_COST['locomote'])
     metabolic_cost_manipulate: float = 0.8  # energy/s at full manipulation (SPEC METABOLIC_COST['manipulate'])
     metabolic_cost_vocalize: float = 0.3  # energy/s at full vocalization (SPEC METABOLIC_COST['vocalize'])
-    metabolic_scale: float = 0.01  # multiplies every metabolic cost; SPEC rates starve an active newborn in ~2 s (DECISIONS D38)
+    metabolic_scale: float = 0.07  # multiplies every metabolic cost: resting starves in ~143 s, inside a 200 s life (DECISIONS D38, D58)
     thermal_k: float = 0.2  # body-temperature relaxation rate toward ambient, 1/s
     thermal_action_gain: float = 0.05  # body heat produced per second at full locomotion
     repair_rate: float = 0.01  # passive integrity repair per second
@@ -152,6 +152,11 @@ class Config:
     perturb_scale: tuple[float, float] = (0.5, 1.5)  # body perturbation: multiplicative range on mass, thrust, turn
     reject_fitness: float = -10.0  # fitness assigned to a rejected (degenerate) genome (SPEC 9.2)
     statue_plasticity: float = 1e-3  # gate·lr below this counts as a step with no plasticity
+    probe_clips: int = 16  # clips in each world's fixed probe set; learn_speed is measured on it (D58)
+    probe_clip_len: int = 20  # consecutive 1 ms frames per clip; the first probe_warmup are context only
+    probe_warmup: int = 5  # frames that give the PCN temporal context before scoring starts
+    probe_stride: int = 500  # steps of scripted walk between clip starts
+    twin_pred_err: float = 0.04  # fixed reference surprise of the resting twin (≈ a naive newborn's), so boredom counts (D58)
     statue_fraction: float = 0.9  # reject if plasticity is absent on more than this fraction of steps
     trivial_err: float = 0.05  # reject if total homeostatic error at birth is below this (setpoints trivially met)
 
@@ -171,13 +176,13 @@ class Config:
 
 def preset(name: str) -> Config:
     """Named configurations. `full` is the SPEC configuration (Phase 1f needs a GPU and days).
-    `tune` is a reduced organism with short lives, for Phase 1e iteration on a CPU (DECISIONS D54)."""
+    `tune` is a reduced organism (full-length 200 s lives) for Phase 1e iteration on a CPU (DECISIONS D54, D58)."""
     if name == "full":
         return Config()
     if name == "tune":
         return replace(
-            Config(), n_rays=8, layer_sizes=(32, 32), pcn_inference_steps=2, dev_steps=30_000, sleep_period=10_000,
+            Config(), n_rays=8, layer_sizes=(32, 32), pcn_inference_steps=2, sleep_period=50_000,
             sleep_replay_batch=64, sleep_consolidation_steps=50, fitness_bin_steps=1_000, n_eval_worlds=2,
-            dev_episodic_capacity=1_024, pop_size=16, metabolic_scale=0.05,
+            dev_episodic_capacity=1_024, pop_size=16,
         )
     raise ValueError(f"unknown preset {name!r}")

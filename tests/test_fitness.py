@@ -1,5 +1,7 @@
 """Acceptance tests for creature/outer/fitness.py (SPEC 7.13, 9)."""
 
+import dataclasses
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -72,3 +74,18 @@ def test_growth_ratio_range() -> None:
     gr = jax.vmap(lambda b: jax.vmap(lambda e: F.growth_ratio(b, e))(xs))(xs)
     assert bool(jnp.all((gr >= -1) & (gr <= 1)))
     assert float(F.growth_ratio(jnp.array(0.5), jnp.array(1.0))) == 0.5
+
+
+def test_stillness_does_not_score_learning() -> None:
+    """D57/D58: an organism that sits still makes its own world predictable; learn_speed
+    is measured on probe clips of the wider world, so stillness must not pay."""
+    from creature.agent import policy as pol
+
+    cfg = dataclasses.replace(CFG, dev_steps=20_000, fitness_bin_steps=1_000, sleep_period=10_000)
+    prior = G.init_genome(jax.random.key(12), cfg)
+    reflex = prior.reflex.at[0].set(50.0)  # an overwhelming inherited urge to rest
+    still = prior.replace(reflex=reflex)
+    comp = jax.jit(lambda g, k: F.fitness_components(g, k, cfg))
+    a, s = comp(prior, jax.random.key(13)), comp(still, jax.random.key(13))
+    print(f"learn_speed: wandering {float(a['learn_speed']):.3f}, still {float(s['learn_speed']):.3f}")
+    assert pol.n_actions(cfg) > 1 and float(s["learn_speed"]) < float(a["learn_speed"])

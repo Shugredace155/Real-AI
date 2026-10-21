@@ -68,8 +68,9 @@ def init_growth() -> Growth:
 
 
 def growth_ratio(birth: jnp.ndarray, now: jnp.ndarray) -> jnp.ndarray:
-    """Defined for any competence values and clipped to [−1, 1]."""
-    return jnp.clip((now - birth) / jnp.maximum(now, 1e-6), -1.0, 1.0)
+    """Defined for any competence values, in [−1, 1]; −1 when current competence is not positive."""
+    ratio = jnp.clip((now - birth) / jnp.maximum(now, 1e-6), -1.0, 1.0)
+    return jnp.where(now > 1e-6, ratio, -1.0)  # no positive competence now: nothing was grown
 
 
 def update_growth(gr: Growth, health: jnp.ndarray, t: jnp.ndarray, cfg: Config) -> Growth:

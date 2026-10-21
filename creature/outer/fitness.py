@@ -6,7 +6,9 @@ on schedule), has its body perturbed halfway through, and is judged on how
 it develops, not only on how it ends up:
 
     survival     fraction of life alive
-    learn_speed  relative fall of prediction error, first → last quarter (weighted 3×: anti-statue)
+    learn_speed  relative fall of the PCN's error on a fixed probe set of views of the
+                 world, first → last quarter (weighted 3×: anti-statue). Measured on
+                 views the organism must go and see, so stillness cannot score (D58)
     competence   last-quarter advantage: health minus the health of a resting twin
                  in an identical world (life.Twin), i.e. what behavior adds
     robustness   last-quarter health relative to the quarter before the body perturbation
@@ -54,7 +56,7 @@ def _quarters(x: jnp.ndarray) -> tuple[jnp.ndarray, ...]:
 
 def life_components(stats: dict, g: O.Endowment, cfg: Config) -> dict:
     """All fitness terms from one life's binned statistics."""
-    first, _, before, last = _quarters(stats["pred_err"])
+    first, _, _, last = _quarters(stats["probe_err"])
     _, _, h_before, h_last = _quarters(stats["health"])
     adv1, _, _, adv_last = _quarters(stats["advantage"])
     survival = stats["alive"].mean()
@@ -92,7 +94,8 @@ def life_components(stats: dict, g: O.Endowment, cfg: Config) -> dict:
 def growth_ratio(competence_birth: jnp.ndarray, competence_end: jnp.ndarray) -> jnp.ndarray:
     """SPEC 9.3: share of final competence acquired during life. Clipped to [−1, 1];
     an organism with no positive final competence scores −1."""
-    return jnp.clip((competence_end - competence_birth) / jnp.maximum(competence_end, EPS), -1.0, 1.0)
+    ratio = jnp.clip((competence_end - competence_birth) / jnp.maximum(competence_end, EPS), -1.0, 1.0)
+    return jnp.where(competence_end > EPS, ratio, -1.0)
 
 
 def fitness_components(genome: Genome, rng: jax.Array, cfg: Config) -> dict:
@@ -110,12 +113,13 @@ def fitness_components(genome: Genome, rng: jax.Array, cfg: Config) -> dict:
     half = dcfg.dev_steps // 2
 
     def one_world(key):
-        k_world, k_life, k_perturb = jax.random.split(key, 3)
+        k_world, k_life, k_perturb, k_probe = jax.random.split(key, 4)
         env = sb.randomize_world(k_world, dcfg)
+        probe = life.make_probe(env, k_probe, dcfg)
         agent = O.spawn(g, dcfg)
         bump = lambda o, w, t: (o, perturb(w, k_perturb, dcfg))
         twin = life.make_twin(env, dcfg)
-        _, _, stats = life.live(agent, env, k_life, 0, dcfg.dev_steps, dcfg.fitness_bin_steps, dcfg, bump, (half,), twin)
+        _, _, stats = life.live(agent, env, k_life, 0, dcfg.dev_steps, dcfg.fitness_bin_steps, dcfg, bump, (half,), twin, probe)
         return life_components(stats, g, dcfg)
 
     per_world = jax.vmap(one_world)(jax.random.split(rng, cfg.n_eval_worlds))
