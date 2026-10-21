@@ -4,7 +4,8 @@ A square walled arena with a few movable objects, regrowing food patches, one
 scripted caregiver and one hazard. Everything is a disk; walls are the arena
 boundary. The organism perceives the world only through egocentric rays that
 report depth and colour of the first surface hit, plus proprioception and its
-own interoceptive vector — never labels or coordinates (SPEC 3, 7.3).
+own interoceptive vector, plus a two-nostril food odor — never labels or
+coordinates (SPEC 3, 7.3).
 
 Every function is pure and operates on a single world; batching is done by the
 caller with `jax.vmap` (Invariant I10). All randomness enters through explicit
@@ -296,10 +297,28 @@ def step_world(world: World, action: jnp.ndarray, key: jax.Array, cfg: Config) -
     return new.replace(ambient=_ambient_at(new, cfg), proximity=_proximity(new, cfg))
 
 
+ODOR_SENSORS = 2  # left and right nostril
+
+
 def obs_dim(cfg: Config) -> int:
     """Length of the observation vector returned by `sense`."""
-    # per ray: depth + RGB; proprioception: body-frame velocity, last action, impact; interoception
-    return 4 * cfg.n_rays + 2 + cfg.act_dim + 1 + cfg.n_drives
+    # per ray: depth + RGB; proprioception: body-frame velocity, last action, impact; smell; interoception
+    return 4 * cfg.n_rays + 2 + cfg.act_dim + 1 + ODOR_SENSORS + cfg.n_drives
+
+
+def odor(world: World, cfg: Config) -> jnp.ndarray:
+    """Food odor at the two nostrils, shape (2,): Σ stock · exp(−distance / odor_scale).
+
+    A raw chemical intensity: it says nothing about what or where the food is,
+    but its left−right difference points toward it, even out of sight.
+    """
+    p = world.params
+    side = jnp.array([1.0, -1.0]) * cfg.nostril_angle
+    angles = world.agent_heading + side
+    nostrils = world.agent_pos + p.agent_radius * jnp.stack([jnp.cos(angles), jnp.sin(angles)], -1)  # (2, 2)
+    d = jnp.linalg.norm(nostrils[:, None, :] - world.food_pos[None], axis=-1)  # (2, F)
+    stock = world.food_amount / cfg.food_capacity
+    return jnp.sum(stock * jnp.exp(-d / cfg.odor_scale), axis=-1)
 
 
 def sense(world: World, drives: jnp.ndarray, cfg: Config) -> jnp.ndarray:
@@ -359,5 +378,5 @@ def sense(world: World, drives: jnp.ndarray, cfg: Config) -> jnp.ndarray:
     c, s = jnp.cos(world.agent_heading), jnp.sin(world.agent_heading)
     body_vel = jnp.array([c * world.agent_vel[0] + s * world.agent_vel[1], -s * world.agent_vel[0] + c * world.agent_vel[1]])
     return jnp.concatenate(
-        [depth, rgb.reshape(-1), body_vel, world.last_action, world.impact[None], drives]
+        [depth, rgb.reshape(-1), body_vel, world.last_action, world.impact[None], odor(world, cfg), drives]
     )

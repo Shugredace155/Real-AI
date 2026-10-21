@@ -39,7 +39,7 @@ class Config:
     arena_half_width: float = 5.0  # half side of the square arena in metres; walls at ±this
     spawn_margin: float = 0.5  # minimum distance from walls for anything placed at spawn
     n_objects: int = 4  # movable inert objects per world
-    n_food: int = 3  # regrowing food patches per world (the only energy source)
+    n_food: int = 6  # regrowing food patches per world (the only energy source; was 3, D60)
     n_rays: int = 16  # egocentric vision rays
     ray_fov: float = 4.0  # total vision field of view in radians, centred on heading
     ray_range: float = 6.0  # max ray distance in metres; beyond it a ray sees nothing
@@ -52,6 +52,8 @@ class Config:
     color_hazard: tuple[float, float, float] = (0.9, 0.1, 0.1)  # hazard
     color_jitter: float = 0.1  # std of per-world Gaussian colour jitter
     food_dim_floor: float = 0.3  # brightness of an empty food patch relative to a full one
+    odor_scale: float = 2.0  # m; food odor falls off as exp(−distance / odor_scale), scaled by the patch's stock
+    nostril_angle: float = 0.8  # rad either side of the heading where the two odor sensors sit, on the body surface
 
     # --- sandbox: per-world randomization ranges, (lo, hi) uniform (SPEC 7.3, 9.2) ---
     friction_range: tuple[float, float] = (0.5, 2.0)  # linear velocity damping, 1/s
@@ -61,7 +63,7 @@ class Config:
     max_turn_range: tuple[float, float] = (2.5, 3.5)  # turn rate at full turn, rad/s
     obj_mass_range: tuple[float, float] = (0.5, 3.0)  # movable object mass, kg
     obj_radius_range: tuple[float, float] = (0.15, 0.35)  # movable object radius, m
-    food_radius_range: tuple[float, float] = (0.25, 0.35)  # food patch radius, m
+    food_radius_range: tuple[float, float] = (0.4, 0.6)  # food patch radius, m (was 0.25–0.35, D60)
     food_regrow_range: tuple[float, float] = (0.01, 0.05)  # food regrowth, capacity units/s
     hazard_radius_range: tuple[float, float] = (0.4, 0.8)  # hazard radius, m
     cg_gain_range: tuple[float, float] = (0.5, 2.0)  # caregiver approach gain toward preferred distance, 1/s

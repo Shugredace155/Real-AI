@@ -45,10 +45,13 @@ def _born_competent_rigid(adaptive: G.Genome) -> G.Genome:
 
 
 def test_learn_speed_dominates() -> None:
-    adaptive = G.init_genome(jax.random.key(6), CFG)
+    # 20 s lives: probe-measured learning (D58) needs more than the 4 s of the shrunken config.
+    cfg = dataclasses.replace(CFG, dev_steps=20_000, fitness_bin_steps=1_000, sleep_period=10_000)
+    comp = jax.jit(lambda g, k: F.fitness_components(g, k, cfg))
+    adaptive = G.init_genome(jax.random.key(6), cfg)
     rigid = _born_competent_rigid(adaptive)
     key = jax.random.key(7)
-    a, r = COMPONENTS(adaptive, key), COMPONENTS(rigid, key)
+    a, r = comp(adaptive, key), comp(rigid, key)
     print("adaptive:", {k: round(float(v), 3) for k, v in a.items()})
     print("rigid:   ", {k: round(float(v), 3) for k, v in r.items()})
     assert float(r["learn_speed"]) < float(a["learn_speed"])

@@ -102,3 +102,18 @@ def test_bodies_stay_in_arena() -> None:
     assert bool(jnp.all(jnp.abs(w.agent_pos) <= lim))
     assert bool(jnp.all(jnp.abs(w.obj_pos) <= lim))
     assert bool(jnp.all(jnp.abs(w.cg_pos) <= lim))
+
+
+def test_odor_points_to_food() -> None:
+    # Smell is stronger nearer food, and the nostril facing the food smells more.
+    w = sb.randomize_world(jax.random.key(10), CFG)
+    w = w.replace(food_pos=jnp.full((CFG.n_food, 2), 3.0), agent_pos=jnp.zeros(2))
+    towards = jnp.arctan2(3.0, 3.0)
+    left_of_food = sb.odor(w.replace(agent_heading=towards - 0.5), CFG)  # food is to the left
+    right_of_food = sb.odor(w.replace(agent_heading=towards + 0.5), CFG)  # food is to the right
+    assert float(left_of_food[0]) > float(left_of_food[1])
+    assert float(right_of_food[1]) > float(right_of_food[0])
+    near = sb.odor(w.replace(agent_pos=jnp.full(2, 2.0)), CFG)
+    assert float(near.sum()) > float(left_of_food.sum())
+    empty = sb.odor(w.replace(food_amount=jnp.zeros(CFG.n_food)), CFG)
+    assert float(empty.max()) == 0.0  # depleted food does not smell
