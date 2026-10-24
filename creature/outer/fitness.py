@@ -123,7 +123,13 @@ def fitness_components(genome: Genome, rng: jax.Array, cfg: Config) -> dict:
         return life_components(stats, g, dcfg)
 
     per_world = jax.vmap(one_world)(jax.random.split(rng, cfg.n_eval_worlds))
-    return jax.tree.map(jnp.mean, per_world)
+    out = jax.tree.map(jnp.mean, per_world)
+    # The growth ratio is a ratio of competences (SPEC 9.3): average competence over
+    # worlds first, then take the ratio. Averaging per-world clipped ratios is meaningless
+    # (one surviving world at +1 and three starved at −1 read as −0.5). D65.
+    out["growth_ratio"] = growth_ratio(out["competence_birth"], out["competence"])
+    out["growth_ratio_raw"] = (out["competence"] - out["competence_birth"]) / jnp.maximum(out["competence"], EPS)
+    return out
 
 
 def developmental_fitness(genome: Genome, rng: jax.Array, cfg: Config) -> jnp.ndarray:

@@ -169,7 +169,8 @@ def main() -> None:
         writer = csv.writer(fh)
         if fresh:
             writer.writerow(["gen", "metabolic_scale", "sigma", "parent_fit", "cand_mean", "cand_max", "growth_ratio",
-                             "competence", "competence_birth", "learn_speed", "survival", "robustness", "seconds"])
+                             "growth_ratio_raw", "competence", "competence_birth", "learn_speed", "survival", "robustness",
+                             "seconds"])
         start = time.time()
 
         def log(gen, fits, state):
@@ -177,7 +178,7 @@ def main() -> None:
             c = components(state.mean, report_key) if report else None  # the same worlds every report
             pick = lambda k: round(float(c[k]), 4) if c is not None else ""
             writer.writerow([gen, curriculum(gen - 1).metabolic_scale, round(float(state.sigma), 5), round(float(state.parent_fit), 4), round(float(fits.mean()), 4),
-                             round(float(fits.max()), 4), pick("growth_ratio"), pick("competence"), pick("competence_birth"),
+                             round(float(fits.max()), 4), pick("growth_ratio"), pick("growth_ratio_raw"), pick("competence"), pick("competence_birth"),
                              pick("learn_speed"), pick("survival"), pick("robustness"), round(time.time() - start)])
             fh.flush()
 

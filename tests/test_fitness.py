@@ -92,3 +92,11 @@ def test_stillness_does_not_score_learning() -> None:
     a, s = comp(prior, jax.random.key(13)), comp(still, jax.random.key(13))
     print(f"learn_speed: wandering {float(a['learn_speed']):.3f}, still {float(s['learn_speed']):.3f}")
     assert pol.n_actions(cfg) > 1 and float(s["learn_speed"]) < float(a["learn_speed"])
+
+
+def test_growth_ratio_aggregates_competence() -> None:
+    # SPEC 9.3: the ratio of mean competences, not the mean of per-world ratios (D65).
+    c = COMPONENTS(G.init_genome(jax.random.key(14), CFG), jax.random.key(15))
+    expected = F.growth_ratio(c["competence_birth"], c["competence"])
+    assert float(c["growth_ratio"]) == float(expected)
+    assert "growth_ratio_raw" in c
