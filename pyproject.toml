@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest==9.1.1"]
+gpu = ["jax[cuda12]==0.12.0"]  # Phase 1f on an NVIDIA GPU
 
 [tool.setuptools.packages.find]
 include = ["creature*"]
