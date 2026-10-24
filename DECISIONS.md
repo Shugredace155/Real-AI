@@ -330,3 +330,8 @@ Format: what was ambiguous, what was chosen, why.
 ### D63. Sensory reflex arcs (chemotaxis)
 - **Gap found:** inherited reflexes mapped only interoception (drive error) to actions, so evolution had no way to encode an instinct like "turn toward the stronger smell". Learning to follow an odor gradient from scratch is hard for the forward model: its horizon is 4 × 100 ms and the reward (eating) is rare and delayed.
 - **Choice:** reflex arcs also read the two raw odor sensors: per action a bias, a weight from each drive error, and a weight from each nostril. R = 10 × (1 + 6 + 2) = 90 genes. Genome dimension 277,580. SPEC 7.12 lists "reflex arcs" as inherited; a stimulus→response arc on a raw sense is the classic form (taxis), and it encodes no knowledge of any particular world, only a disposition, consistent with I8.
+
+### D64. RESULT of the fourth tuning run (curriculum, D62) — best so far; Growth Ratio still not measurable in most worlds
+- **Run:** `preset("tune")`, 20 generations, curriculum 0.015 (6) → 0.03 (6) → 0.05 (4) → 0.07 (4), population 16, 2 worlds per candidate; reports in 4 fixed worlds at 0.07. 2 h 46 min. Log: `runs/tune4/evolve_tune.csv`. (Run before D63's chemotaxis reflex.)
+- **At the target metabolism:** survival 0.22 → 0.51 (gen 18) / 0.45 (gen 20); probe learn_speed −0.13 → 0.30, rising steadily (the highest yet); competence > 0 in one of the 4 report worlds at gen 18 (0.08, Growth Ratio −0.5 averaged over worlds).
+- Most lives still end before the last quarter, so competence is 0 there and the Growth Ratio is −1. The next run continues from this genome with D63's sensory reflex genes added (initialized to 0), at the target metabolism.
