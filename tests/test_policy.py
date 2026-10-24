@@ -104,3 +104,24 @@ def test_policy_vmappable() -> None:
     kn = _knobs()
     a, logits = jax.vmap(lambda z, k: pol.policy(pol.init_dyn(CFG), z, E, kn, G, CFG, k))(zs, keys)
     assert a.shape == (b,) and logits.shape == (b, A)
+
+
+def test_chemotaxis_reflex() -> None:
+    # An inherited sensory reflex: stronger smell on the left -> turn left (D63).
+    left, right = 3, 4
+    d = CFG.n_drives
+    W_sense = jnp.zeros((A, 2)).at[left, 0].set(20.0).at[right, 1].set(20.0)
+    reflex = jnp.zeros(pol.n_reflex(CFG)).at[A + A * d :].set(W_sense.reshape(-1))
+    g = G.replace(reflex=reflex)
+    dyn = pol.init_dyn(CFG)
+    smell_left = pol.policy_logits(dyn, Z, E, _knobs(), g, CFG, senses=jnp.array([0.9, 0.1]))
+    smell_right = pol.policy_logits(dyn, Z, E, _knobs(), g, CFG, senses=jnp.array([0.1, 0.9]))
+    assert int(jnp.argmax(smell_left)) == left and int(jnp.argmax(smell_right)) == right
+
+
+def test_odor_slice_matches_sense() -> None:
+    from creature.body import sandbox as sb
+
+    w = sb.randomize_world(jax.random.key(9), CFG)
+    obs = sb.sense(w, jnp.zeros(CFG.n_drives), CFG)
+    assert jnp.allclose(obs[sb.odor_slice(CFG)], sb.odor(w, CFG))

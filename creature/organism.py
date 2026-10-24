@@ -211,7 +211,7 @@ def step(org: Organism, world: sb.World, key: jax.Array, cfg: Config) -> tuple[O
     z = pstate.act[1]
     err_vec = affect.homeostatic_error(homeo.drives, g)
     decide = (org.t + 1) % cfg.policy_period == 0
-    a_new, logits = pol.policy(org.dyn, z, err_vec, kn, g, cfg, k_pol)
+    a_new, logits = pol.policy(org.dyn, z, err_vec, kn, g, cfg, k_pol, senses=obs[sb.odor_slice(cfg)])
     action_idx = jnp.where(decide, a_new, org.action_idx)
     action = pol.primitive(action_idx, cfg)
 

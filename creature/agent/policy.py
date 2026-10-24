@@ -58,9 +58,12 @@ def dyn_sizes(cfg: Config) -> tuple[int, int]:
     return z + cfg.n_drives + 2, z + a + a * cfg.dyn_interaction_dims
 
 
+REFLEX_SENSES = 2  # raw sensory inputs reflexes may read: the two odor sensors (chemotaxis, D63)
+
+
 def n_reflex(cfg: Config) -> int:
-    """Reflex genes: a bias per action plus a weight from each drive error to each action."""
-    return n_actions(cfg) * (1 + cfg.n_drives)
+    """Reflex genes: per action, a bias, a weight from each drive error, and a weight from each reflex sense."""
+    return n_actions(cfg) * (1 + cfg.n_drives + REFLEX_SENSES)
 
 
 def init_dyn(cfg: Config) -> DynParams:
@@ -132,23 +135,32 @@ def expected_free_energy(
     return jax.vmap(rollout)(jnp.arange(n_actions(cfg)))
 
 
-def reflex_logits(err_vec: jnp.ndarray, g: Any, cfg: Config) -> jnp.ndarray:
-    """Inherited reflex arcs: bias + drive-error → action weights, shape (n_actions,)."""
-    a = n_actions(cfg)
-    bias, W = g.reflex[:a], g.reflex[a:].reshape(a, cfg.n_drives)
-    return bias + W @ err_vec
+def reflex_logits(err_vec: jnp.ndarray, g: Any, cfg: Config, senses: jnp.ndarray | None = None) -> jnp.ndarray:
+    """Inherited reflex arcs, shape (n_actions,): bias + drive error → action + raw sense → action.
+
+    The sensory arc lets evolution encode instincts such as chemotaxis (turn toward
+    the stronger smell) without encoding any knowledge of the world (D63).
+    """
+    a, d = n_actions(cfg), cfg.n_drives
+    bias = g.reflex[:a]
+    W_drive = g.reflex[a : a + a * d].reshape(a, d)
+    W_sense = g.reflex[a + a * d :].reshape(a, REFLEX_SENSES)
+    senses = jnp.zeros(REFLEX_SENSES) if senses is None else senses
+    return bias + W_drive @ err_vec + W_sense @ senses
 
 
 def policy_logits(
-    dyn: DynParams, z: jnp.ndarray, err_vec: jnp.ndarray, knobs: dict, g: Any, cfg: Config
+    dyn: DynParams, z: jnp.ndarray, err_vec: jnp.ndarray, knobs: dict, g: Any, cfg: Config,
+    senses: jnp.ndarray | None = None,
 ) -> jnp.ndarray:
     """Action logits: −G / temperature plus reflexes. Invariant I5 (NE, 5HT, OT)."""
     G = expected_free_energy(dyn, z, err_vec, knobs, g, cfg)
-    return -G / (knobs["temperature"] + 1e-6) + reflex_logits(err_vec, g, cfg)
+    return -G / (knobs["temperature"] + 1e-6) + reflex_logits(err_vec, g, cfg, senses)
 
 
 def policy(
-    dyn: DynParams, z: jnp.ndarray, err_vec: jnp.ndarray, knobs: dict, g: Any, cfg: Config, key: jax.Array
+    dyn: DynParams, z: jnp.ndarray, err_vec: jnp.ndarray, knobs: dict, g: Any, cfg: Config, key: jax.Array,
+    senses: jnp.ndarray | None = None,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Sample a motor primitive.
 
@@ -156,7 +168,7 @@ def policy(
         (action index, logits).
     Invariants: I5, I9, I10.
     """
-    logits = policy_logits(dyn, z, err_vec, knobs, g, cfg)
+    logits = policy_logits(dyn, z, err_vec, knobs, g, cfg, senses)
     return jax.random.categorical(key, logits), logits
 
 

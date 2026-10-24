@@ -326,3 +326,7 @@ Format: what was ambiguous, what was chosen, why.
 ### D62. Metabolic curriculum and fixed report worlds (Phase 1e)
 - `evolve(..., curriculum=f)` takes a per-generation config (one compile per distinct stage; resume stays bit-identical because the config is a pure function of the generation). The CLI's `--curriculum 'scale:gens,...'` schedules `metabolic_scale`: early generations live long enough to learn foraging, later ones face the target pressure (D61's "eats, but not enough").
 - Mean-genome reports are now always evaluated in the same `--report-worlds` (default 4) worlds, at the preset's target metabolism, so report-to-report changes reflect the genome, not the draw of worlds (D61's survival swinging 0.76 → 0.17).
+
+### D63. Sensory reflex arcs (chemotaxis)
+- **Gap found:** inherited reflexes mapped only interoception (drive error) to actions, so evolution had no way to encode an instinct like "turn toward the stronger smell". Learning to follow an odor gradient from scratch is hard for the forward model: its horizon is 4 × 100 ms and the reward (eating) is rare and delayed.
+- **Choice:** reflex arcs also read the two raw odor sensors: per action a bias, a weight from each drive error, and a weight from each nostril. R = 10 × (1 + 6 + 2) = 90 genes. Genome dimension 277,580. SPEC 7.12 lists "reflex arcs" as inherited; a stimulus→response arc on a raw sense is the classic form (taxis), and it encodes no knowledge of any particular world, only a disposition, consistent with I8.

@@ -306,6 +306,12 @@ def obs_dim(cfg: Config) -> int:
     return 4 * cfg.n_rays + 2 + cfg.act_dim + 1 + ODOR_SENSORS + cfg.n_drives
 
 
+def odor_slice(cfg: Config) -> slice:
+    """Where the two odor readings sit in the observation vector."""
+    start = 4 * cfg.n_rays + 2 + cfg.act_dim + 1
+    return slice(start, start + ODOR_SENSORS)
+
+
 def odor(world: World, cfg: Config) -> jnp.ndarray:
     """Food odor at the two nostrils, shape (2,): Σ stock · exp(−distance / odor_scale).
 
