@@ -108,6 +108,7 @@ def test_odor_points_to_food() -> None:
     # Smell is stronger nearer food, and the nostril facing the food smells more.
     w = sb.randomize_world(jax.random.key(10), CFG)
     w = w.replace(food_pos=jnp.full((CFG.n_food, 2), 3.0), agent_pos=jnp.zeros(2))
+    w = w.replace(params=w.params.replace(hazard_odor=jnp.zeros(())))  # food alone
     towards = jnp.arctan2(3.0, 3.0)
     left_of_food = sb.odor(w.replace(agent_heading=towards - 0.5), CFG)  # food is to the left
     right_of_food = sb.odor(w.replace(agent_heading=towards + 0.5), CFG)  # food is to the right
@@ -117,3 +118,15 @@ def test_odor_points_to_food() -> None:
     assert float(near.sum()) > float(left_of_food.sum())
     empty = sb.odor(w.replace(food_amount=jnp.zeros(CFG.n_food)), CFG)
     assert float(empty.max()) == 0.0  # depleted food does not smell
+
+
+def test_hazard_odor_varies_by_world() -> None:
+    # D68: the hazard smells in some worlds and not others, so smell alone is ambiguous.
+    w = jax.vmap(lambda k: sb.randomize_world(k, CFG))(jax.random.split(jax.random.key(11), 200))
+    lo, hi = CFG.hazard_odor_range
+    assert float(w.params.hazard_odor.min()) >= lo and float(w.params.hazard_odor.max()) <= hi
+    one = sb.randomize_world(jax.random.key(12), CFG)
+    one = one.replace(food_amount=jnp.zeros(CFG.n_food), agent_pos=one.hazard_pos + 1.0)
+    smelly = one.replace(params=one.params.replace(hazard_odor=jnp.asarray(1.0)))
+    assert float(sb.odor(smelly, CFG).sum()) > 0.0
+    assert float(sb.odor(one.replace(params=one.params.replace(hazard_odor=jnp.zeros(()))), CFG).sum()) == 0.0

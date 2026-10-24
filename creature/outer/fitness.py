@@ -10,7 +10,9 @@ it develops, not only on how it ends up:
                  world, first → last quarter (weighted 3×: anti-statue). Measured on
                  views the organism must go and see, so stillness cannot score (D58)
     competence   last-quarter advantage: health minus the health of a resting twin
-                 in an identical world (life.Twin), i.e. what behavior adds
+                 in an identical world (life.Twin), i.e. what behavior adds. Its
+                 birth counterpart is a newborn dropped into the same last-quarter
+                 situation, so the growth ratio compares one task at two ages (D67)
     robustness   last-quarter health relative to the quarter before the body perturbation
     curiosity    mean learning progress (intrinsic reward; not scaled by any gene)
     hack         fraction of life with no plasticity + trivially low homeostatic error
@@ -33,6 +35,7 @@ from creature.affect import core as affect
 from creature.body import sandbox as sb
 from creature.config import Config
 from creature.outer.genome import Genome, express
+from creature.substrate import plasticity as pl
 
 EPS = 1e-6
 
@@ -49,13 +52,23 @@ def perturb(world: sb.World, key: jax.Array, cfg: Config) -> sb.World:
     return world.replace(params=p.replace(agent_mass=p.agent_mass * s[0], max_thrust=p.max_thrust * s[1], max_turn=p.max_turn * s[2]))
 
 
+def frozen(g: O.Endowment) -> O.Endowment:
+    """The endowment with every waking learning rate at the floor: instincts only."""
+    floor = lambda tree: jax.tree.map(lambda x: jnp.full_like(x, pl.LOG_LR_MIN), tree)
+    return g.replace(pcn_log_lr=floor(g.pcn_log_lr), dyn_log_lr=floor(g.dyn_log_lr))
+
+
 def _quarters(x: jnp.ndarray) -> tuple[jnp.ndarray, ...]:
     q = x.shape[0] // 4
     return x[:q], x[q : 2 * q], x[2 * q : 3 * q], x[3 * q :]
 
 
-def life_components(stats: dict, g: O.Endowment, cfg: Config) -> dict:
-    """All fitness terms from one life's binned statistics."""
+def life_components(stats: dict, g: O.Endowment, cfg: Config, newborn_competence: jnp.ndarray) -> dict:
+    """All fitness terms from one life's binned statistics.
+
+    `newborn_competence` is the advantage a newborn achieves when dropped into the
+    adult's last-quarter situation (D67): competence at birth, on the same task.
+    """
     first, _, _, last = _quarters(stats["probe_err"])
     _, _, h_before, h_last = _quarters(stats["health"])
     adv1, _, _, adv_last = _quarters(stats["advantage"])
@@ -86,8 +99,9 @@ def life_components(stats: dict, g: O.Endowment, cfg: Config) -> dict:
         curiosity=curiosity,
         hack=hack,
         rejected=rejected.astype(jnp.float32),
-        competence_birth=adv1.mean(),
-        growth_ratio=growth_ratio(adv1.mean(), competence),
+        competence_birth=newborn_competence,
+        competence_first_quarter=adv1.mean(),
+        growth_ratio=growth_ratio(newborn_competence, competence),
     )
 
 
@@ -111,6 +125,9 @@ def fitness_components(genome: Genome, rng: jax.Array, cfg: Config) -> dict:
     dcfg = dev_config(cfg)
     g = express(genome, dcfg)
     half = dcfg.dev_steps // 2
+    q3 = 3 * dcfg.dev_steps // 4
+    bins = dcfg.fitness_bin_steps
+    innate = frozen(g)
 
     def one_world(key):
         k_world, k_life, k_perturb, k_probe = jax.random.split(key, 4)
@@ -119,8 +136,18 @@ def fitness_components(genome: Genome, rng: jax.Array, cfg: Config) -> dict:
         agent = O.spawn(g, dcfg)
         bump = lambda o, w, t: (o, perturb(w, k_perturb, dcfg))
         twin = life.make_twin(env, dcfg)
-        _, _, stats = life.live(agent, env, k_life, 0, dcfg.dev_steps, dcfg.fitness_bin_steps, dcfg, bump, (half,), twin, probe)
-        return life_components(stats, g, dcfg)
+        # First three quarters of the life, including the body perturbation at the half.
+        agent, env, early, twin = life.live(agent, env, k_life, 0, q3, bins, dcfg, bump, (half,), twin, probe, True)
+        # Last quarter, twice from the same moment, world and body state: the adult who lived
+        # the first three quarters, and a newborn (birth weights, nothing learned) in its place.
+        _, _, late = life.live(agent, env, k_life, q3, dcfg.dev_steps - q3, bins, dcfg, twin=twin, probe=probe)
+        # The newborn probe has only what it was born with: its waking plasticity is off, so it
+        # cannot learn the task during the very quarter it is scored on (D67). It is a Phase 1
+        # measuring instrument, never the living organism (I3 is about the organism).
+        newborn = O.spawn(innate, dcfg).replace(t=agent.t, homeo=agent.homeo, err_mag=agent.err_mag)
+        _, _, fresh = life.live(newborn, env, k_life, q3, dcfg.dev_steps - q3, bins, dcfg, twin=twin)
+        stats = jax.tree.map(lambda a, b: jnp.concatenate([a, b]), early, late)
+        return life_components(stats, g, dcfg, fresh["advantage"].mean())
 
     per_world = jax.vmap(one_world)(jax.random.split(rng, cfg.n_eval_worlds))
     out = jax.tree.map(jnp.mean, per_world)

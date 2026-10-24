@@ -41,6 +41,7 @@ class WorldParams:
     food_radius: jnp.ndarray  # (F,)
     food_regrow: jnp.ndarray  # ()
     hazard_radius: jnp.ndarray  # ()
+    hazard_odor: jnp.ndarray  # () how strongly the hazard smells, relative to full food (per world)
     cg_gain: jnp.ndarray  # ()
     cg_pref_dist: jnp.ndarray  # ()
     cg_wander: jnp.ndarray  # ()
@@ -131,6 +132,7 @@ def randomize_world(key: jax.Array, cfg: Config) -> World:
         food_radius=_uniform(next(ks), cfg.food_radius_range, (cfg.n_food,)),
         food_regrow=_uniform(next(ks), cfg.food_regrow_range),
         hazard_radius=_uniform(next(ks), cfg.hazard_radius_range),
+        hazard_odor=_uniform(next(ks), cfg.hazard_odor_range),
         cg_gain=_uniform(next(ks), cfg.cg_gain_range),
         cg_pref_dist=_uniform(next(ks), cfg.cg_pref_dist_range),
         cg_wander=_uniform(next(ks), cfg.cg_wander_range),
@@ -313,10 +315,13 @@ def odor_slice(cfg: Config) -> slice:
 
 
 def odor(world: World, cfg: Config) -> jnp.ndarray:
-    """Food odor at the two nostrils, shape (2,): Σ stock · exp(−distance / odor_scale).
+    """Odor at the two nostrils, shape (2,): Σ food stock · exp(−d / odor_scale) + hazard odor.
 
-    A raw chemical intensity: it says nothing about what or where the food is,
-    but its left−right difference points toward it, even out of sight.
+    A raw chemical intensity that says nothing about its source. Food always
+    smells; the hazard smells too, with a strength that differs between worlds
+    (0 to 1.5× a full patch). A blind "follow the smell" instinct therefore leads
+    into the hazard in some worlds, and only learning, in this world, tells the
+    organism what its smells mean (D68).
     """
     p = world.params
     side = jnp.array([1.0, -1.0]) * cfg.nostril_angle
@@ -324,7 +329,9 @@ def odor(world: World, cfg: Config) -> jnp.ndarray:
     nostrils = world.agent_pos + p.agent_radius * jnp.stack([jnp.cos(angles), jnp.sin(angles)], -1)  # (2, 2)
     d = jnp.linalg.norm(nostrils[:, None, :] - world.food_pos[None], axis=-1)  # (2, F)
     stock = world.food_amount / cfg.food_capacity
-    return jnp.sum(stock * jnp.exp(-d / cfg.odor_scale), axis=-1)
+    food = jnp.sum(stock * jnp.exp(-d / cfg.odor_scale), axis=-1)
+    d_h = jnp.linalg.norm(nostrils - world.hazard_pos[None], axis=-1)
+    return food + p.hazard_odor * jnp.exp(-d_h / cfg.odor_scale)
 
 
 def sense(world: World, drives: jnp.ndarray, cfg: Config) -> jnp.ndarray:

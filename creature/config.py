@@ -66,6 +66,7 @@ class Config:
     food_radius_range: tuple[float, float] = (0.4, 0.6)  # food patch radius, m (was 0.25–0.35, D60)
     food_regrow_range: tuple[float, float] = (0.01, 0.05)  # food regrowth, capacity units/s
     hazard_radius_range: tuple[float, float] = (0.4, 0.8)  # hazard radius, m
+    hazard_odor_range: tuple[float, float] = (0.0, 1.5)  # hazard odor strength relative to a full food patch; differs per world (D68)
     cg_gain_range: tuple[float, float] = (0.5, 2.0)  # caregiver approach gain toward preferred distance, 1/s
     cg_pref_dist_range: tuple[float, float] = (0.5, 1.5)  # caregiver preferred distance from the organism, m
     cg_wander_range: tuple[float, float] = (0.1, 0.5)  # caregiver wander-velocity noise scale, m/s
@@ -177,7 +178,7 @@ class Config:
 
 
 # Phase 1e results applied on top of the SPEC defaults (SPEC 9.3: growth ratio ≈ 1 → raise w_competence). D66.
-TUNED = dict(w_competence=3.0)
+TUNED = dict(w_competence=1.0)  # 3.0 tried in D66; reverted in D68 once the growth ratio was measured correctly
 
 
 def preset(name: str) -> Config:

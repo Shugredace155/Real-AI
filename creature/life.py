@@ -165,14 +165,15 @@ def live(
     extra_breaks: tuple[int, ...] = (),
     twin: Twin | None = None,
     probe: jnp.ndarray | None = None,
-) -> tuple[O.Organism, sb.World, dict]:
+    return_twin: bool = False,
+):
     """Live from step t0 for n_steps, sleeping on schedule.
 
     `t0` must equal `org.t` (passed statically so the schedule is known while
     tracing). `at_break(org, world, t)` is called at each extra breakpoint
     (e.g. a body perturbation; it is applied to the twin's world too).
     Segment lengths must be multiples of bin_steps. Returns the organism,
-    world and concatenated per-bin stats.
+    world and concatenated per-bin stats (and the twin, if `return_twin`).
     """
     stats = []
     for start, length, sleep_after in segments(t0, n_steps, cfg, extra_breaks):
@@ -187,4 +188,5 @@ def live(
             org, world = at_break(org, world, end)
             if twin is not None:
                 twin = twin.replace(world=at_break(org, twin.world, end)[1])
-    return org, world, jax.tree.map(lambda *xs: jnp.concatenate(xs), *stats)
+    stats = jax.tree.map(lambda *xs: jnp.concatenate(xs), *stats)
+    return (org, world, stats, twin) if return_twin else (org, world, stats)
