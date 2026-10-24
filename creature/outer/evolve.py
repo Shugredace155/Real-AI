@@ -176,6 +176,8 @@ def main() -> None:
         def log(gen, fits, state):
             report = gen % args.report_every == 0 or gen == 1
             c = components(state.mean, report_key) if report else None  # the same worlds every report
+            if report:  # keep every reported genome: the best one is often not the last (D69)
+                Genome.from_flat(state.mean, cfg).save(out / f"genome_gen{gen:04d}.npz")
             pick = lambda k: round(float(c[k]), 4) if c is not None else ""
             writer.writerow([gen, curriculum(gen - 1).metabolic_scale, round(float(state.sigma), 5), round(float(state.parent_fit), 4), round(float(fits.mean()), 4),
                              round(float(fits.max()), 4), pick("growth_ratio"), pick("growth_ratio_raw"), pick("competence"), pick("competence_birth"),
