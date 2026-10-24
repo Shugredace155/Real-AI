@@ -12,6 +12,7 @@ run restored from a checkpoint continues bit-identically.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
 from pathlib import Path
 
@@ -102,19 +103,25 @@ def evolve(
     checkpoint: str | Path | None = None,
     log: Callable[[int, jnp.ndarray, EvolveState], None] | None = None,
     eval_batch: int = 8,
+    curriculum: Callable[[int], Config] | None = None,
 ) -> EvolveState:
     """Run evolution for `generations` (default `cfg.generations`).
 
     If `checkpoint` exists the run resumes from it; the state is saved there
     after every generation. `log(gen, fits, state)` is called each generation;
     `state.parent_fit` is the fitness of the generation's mean genome.
+    `curriculum(gen)` optionally gives the config for generation `gen`
+    (0-based), e.g. a metabolic schedule; it must not change genome shapes.
     Returns the final state; `Genome.from_flat(state.mean)` is the endowment.
     """
     total = cfg.generations if generations is None else generations
     state = load_state(checkpoint) if checkpoint is not None and Path(checkpoint).exists() else init_state(rng, cfg)
-    step = jax.jit(lambda s: generation(s, cfg, fitness_fn, eval_batch))
+    compiled: dict[Config, Callable] = {}
     while int(state.gen) < total:
-        state, fits = step(state)
+        c = cfg if curriculum is None else curriculum(int(state.gen))
+        if c not in compiled:  # one compile per curriculum stage
+            compiled[c] = jax.jit(lambda s, c=c: generation(s, c, fitness_fn, eval_batch))
+        state, fits = compiled[c](state)
         if log is not None:
             log(int(state.gen), fits, state)
         if checkpoint is not None:
@@ -135,32 +142,49 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="runs")
     ap.add_argument("--report-every", type=int, default=5, help="evaluate the mean genome's components this often")
+    ap.add_argument("--report-worlds", type=int, default=4, help="worlds for each mean-genome report (always the same worlds)")
+    ap.add_argument(
+        "--curriculum", default="",
+        help="metabolic schedule 'scale:generations,...', e.g. '0.02:8,0.04:6,0.07:6'; the last stage holds after (D62)",
+    )
     args = ap.parse_args()
 
     cfg = preset(args.preset)
+    stages = [(float(a), int(b)) for a, b in (x.split(":") for x in args.curriculum.split(",") if x)]
+
+    def curriculum(gen: int) -> Config:
+        for scale, n in stages:
+            if gen < n:
+                return dataclasses.replace(cfg, metabolic_scale=scale)
+            gen -= n
+        return dataclasses.replace(cfg, metabolic_scale=stages[-1][0]) if stages else cfg
+
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    components = jax.jit(lambda flat, k: fitness_components(Genome.from_flat(flat, cfg), k, cfg))
+    report_cfg = dataclasses.replace(cfg, n_eval_worlds=args.report_worlds)  # judged at the target metabolism
+    components = jax.jit(lambda flat, k: fitness_components(Genome.from_flat(flat, report_cfg), k, report_cfg))
     log_path = out / f"evolve_{args.preset}.csv"
     fresh = not log_path.exists()
     with open(log_path, "a", newline="") as fh:
         writer = csv.writer(fh)
         if fresh:
-            writer.writerow(["gen", "sigma", "parent_fit", "cand_mean", "cand_max", "growth_ratio", "competence",
-                             "competence_birth", "learn_speed", "survival", "robustness", "seconds"])
+            writer.writerow(["gen", "metabolic_scale", "sigma", "parent_fit", "cand_mean", "cand_max", "growth_ratio",
+                             "competence", "competence_birth", "learn_speed", "survival", "robustness", "seconds"])
         start = time.time()
 
         def log(gen, fits, state):
             report = gen % args.report_every == 0 or gen == 1
-            c = components(state.mean, jax.random.fold_in(jax.random.key(10_000), gen)) if report else None
+            c = components(state.mean, report_key) if report else None  # the same worlds every report
             pick = lambda k: round(float(c[k]), 4) if c is not None else ""
-            writer.writerow([gen, round(float(state.sigma), 5), round(float(state.parent_fit), 4), round(float(fits.mean()), 4),
+            writer.writerow([gen, curriculum(gen - 1).metabolic_scale, round(float(state.sigma), 5), round(float(state.parent_fit), 4), round(float(fits.mean()), 4),
                              round(float(fits.max()), 4), pick("growth_ratio"), pick("competence"), pick("competence_birth"),
                              pick("learn_speed"), pick("survival"), pick("robustness"), round(time.time() - start)])
             fh.flush()
 
-        # The one place Phase 1 mints its root key, from the command-line seed.
-        state = evolve(cfg, jax.random.key(args.seed), args.generations, checkpoint=out / f"evolve_{args.preset}_state.npz", log=log)
+        # The one place Phase 1 mints its root keys: evolution's, from the seed, and the fixed report worlds'.
+        report_key = jax.random.key(10_000)
+        state = evolve(cfg, jax.random.key(args.seed), args.generations, checkpoint=out / f"evolve_{args.preset}_state.npz",
+                       log=log, curriculum=curriculum)
     Genome.from_flat(state.mean, cfg).save(out / "species_endowment.npz")
     print(f"wrote {out / 'species_endowment.npz'} after {int(state.gen)} generations")
 

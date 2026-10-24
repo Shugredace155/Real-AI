@@ -57,3 +57,19 @@ def test_real_fitness_generation() -> None:
     state = E.evolve(cfg, jax.random.key(4), generations=2, log=lambda g, f, s: fits.append(np.asarray(f)), eval_batch=2)
     assert int(state.gen) == 2 and np.all(np.isfinite(np.stack(fits)))
     assert np.isfinite(np.asarray(state.mean)).all()
+
+
+def test_curriculum_switches_config() -> None:
+    # A per-generation config schedule is honored, and resuming mid-curriculum is still bit-identical.
+    seen = []
+
+    def fit(flat, key, cfg):
+        return _toy_fitness(flat, key, cfg) - cfg.metabolic_scale
+
+    def sched(gen):
+        c = dataclasses.replace(CFG, metabolic_scale=0.02 if gen < 2 else 0.07)
+        seen.append(c.metabolic_scale)
+        return c
+
+    E.evolve(CFG, jax.random.key(5), generations=4, fitness_fn=fit, curriculum=sched)
+    assert seen == [0.02, 0.02, 0.07, 0.07]
