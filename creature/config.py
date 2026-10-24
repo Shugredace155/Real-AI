@@ -176,15 +176,19 @@ class Config:
     birth_seed: int = 0  # the single seed of the one Phase 2 life
 
 
+# Phase 1e results applied on top of the SPEC defaults (SPEC 9.3: growth ratio ≈ 1 → raise w_competence). D66.
+TUNED = dict(w_competence=3.0)
+
+
 def preset(name: str) -> Config:
     """Named configurations. `full` is the SPEC configuration (Phase 1f needs a GPU and days).
     `tune` is a reduced organism (full-length 200 s lives) for Phase 1e iteration on a CPU (DECISIONS D54, D58)."""
     if name == "full":
-        return Config()
+        return replace(Config(), **TUNED)
     if name == "tune":
         return replace(
             Config(), n_rays=8, layer_sizes=(32, 32), pcn_inference_steps=2, sleep_period=50_000,
             sleep_replay_batch=64, sleep_consolidation_steps=50, fitness_bin_steps=1_000, n_eval_worlds=2,
-            dev_episodic_capacity=1_024, pop_size=16,
+            dev_episodic_capacity=1_024, pop_size=16, **TUNED,
         )
     raise ValueError(f"unknown preset {name!r}")
